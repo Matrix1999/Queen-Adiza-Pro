@@ -1,0 +1,864 @@
+// matrixtele.js (Updated content with explicit range function)
+
+
+const fs = require('fs');
+const path = require('path');
+
+const pairingPath = path.join(__dirname, 'lib2', 'pairing');
+
+if (!fs.existsSync(pairingPath)) {
+    fs.mkdirSync(pairingPath, { recursive: true });
+    console.log(`[MATRIXTELE] Created missing directory: ${pairingPath}`);
+}
+
+process.on('uncaughtException', console.error)
+require("./settings") // Ensure settings.js is properly required to access global.DEVELOPER and global.OWNER
+const {
+    Telegraf,
+    Context,
+    Markup
+} = require('telegraf')
+const {
+    message,
+    editedMessage,
+    channelPost,
+    editedChannelPost,
+    callbackQuery
+} = require("telegraf/filters");
+const {
+    toFirstCase,
+    isNumber,
+    formatp,
+    parseMention,
+    resize,
+    getRandom,
+    generateProfilePicture,
+    getCase,
+    runtime, // Used from here
+    FileSize,
+    h2k,
+    makeid,
+    kyun,
+    randomNomor,
+    jsonformat,
+    // isUrl, // isUrl might be needed, but will handle if it causes new errors
+    fetchJson,
+    sleep, // Used from here
+    getBuffer
+} = require("./lib/myfunc2");
+const {
+    formatSize
+} = require("./lib/myfunc3"); // Used from here
+const chalk = require('chalk')
+
+const fetch = require('node-fetch')
+const os = require('os')
+const speed = require('performance-now')
+const util = require('util')
+const yts = require('yt-search')
+const moment = require('moment-timezone'); 
+const timezones = "Africa/Accra";
+const axios = require('axios');
+const crypto = require('crypto');
+const {
+    webcrack
+} = require('webcrack');
+const JSConfuser = require("js-confuser");
+
+const cooldowns = new Map(); // Create a map to track cooldowns
+
+
+
+//  telegram Add Premium function
+
+const adminfile = path.join(__dirname, 'lib', 'premium.json');
+let adminIDs = JSON.parse(fs.readFileSync(adminfile, 'utf8'));
+
+fs.watchFile(adminfile, () => {
+  adminIDs = JSON.parse(fs.readFileSync(adminfile, 'utf8'));
+  console.log('Premium user list updated dynamically');
+});
+
+function isPremiumUser(userId) {
+
+  return adminIDs.includes(userId);
+
+}
+
+
+
+
+// Explicitly define the 'range' function here for use in the 'reply' function
+function range(start, stop, step) {
+    if (stop == null) {
+        stop = start || 0;
+        start = 0;
+    }
+    if (step == null) {
+        step = stop > start ? 1 : -1;
+    }
+    var toReturn = [];
+    for (; (step > 0 ? stop > start : stop < start); start += step) {
+        toReturn.push(start);
+    }
+    return toReturn;
+}
+
+
+// Define escapeMarkdownV2 function locally in matrixtele.js
+function escapeMarkdownV2(text) {
+    return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
+module.exports = XeonBotInc = async (XeonBotInc, bot) => {
+    //console.log(XeonBotInc)
+    try {
+        const body = XeonBotInc.message.text || XeonBotInc.message.caption || ''
+        const budy = (typeof XeonBotInc.message.text == 'string' ? XeonBotInc.message.text : '')
+
+        const isCmd = /^[°•π÷×¶∆£¢€¥®™✓_=|~!?#/$%^&.+-,\\\©^]/.test(body)
+        const args = body.trim().split(/ +/).slice(1);
+        const text = q = args.join(" ");
+        // --- CORRECTED ORDER ---
+        // 1. Get the user object first.
+        const user = XeonBotInc.message.from;
+        // 2. Now that 'user' exists, create other variables from it.
+        const pushname = user.first_name; // Use first_name as pushname
+        const fullName = user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name;
+        const userId = user.id.toString();
+
+        const isCreator = global.OWNER.includes(XeonBotInc.update.message.from.username ? `https://t.me/${XeonBotInc.update.message.from.username}` : '') || global.DEVELOPER.includes(userId);
+        const from = XeonBotInc.message.chat.id
+        const prefix = isCmd ? body[0] : ''
+        const command = isCreator ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : isCmd ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : '';
+        const isGroup = XeonBotInc.chat.type.includes('group')
+        const groupName = isGroup ? XeonBotInc.chat.title : ''
+
+        const isImage = XeonBotInc.message.hasOwnProperty('photo')
+        const isVideo = XeonBotInc.message.hasOwnProperty('video')
+        const isAudio = XeonBotInc.message.hasOwnProperty('audio')
+        const isSticker = XeonBotInc.message.hasOwnProperty('sticker')
+        const isContact = XeonBotInc.message.hasOwnProperty('contact')
+        const isLocation = XeonBotInc.message.hasOwnProperty('location')
+        const isDocument = XeonBotInc.message.hasOwnProperty('document')
+        const isAnimation = XeonBotInc.message.hasOwnProperty('animation')
+        const isMedia = isImage || isVideo || isAudio || isSticker || isContact || isLocation || isDocument || isAnimation
+        const quotedMessage = XeonBotInc.message.reply_to_message || {}
+        const isQuotedImage = quotedMessage.hasOwnProperty('photo')
+        const isQuotedVideo = quotedMessage.hasOwnProperty('video')
+        const isQuotedAudio = quotedMessage.hasOwnProperty('audio')
+        const isQuotedSticker = quotedMessage.hasOwnProperty('sticker')
+        const isQuotedContact = quotedMessage.hasOwnProperty('contact')
+        const isQuotedLocation = quotedMessage.hasOwnProperty('location')
+        const isQuotedDocument = quotedMessage.hasOwnProperty('document')
+        const isQuotedAnimation = quotedMessage.hasOwnProperty('animation')
+        const isQuoted = XeonBotInc.message.hasOwnProperty('reply_to_message')
+        const timestampi = speed();
+        const latensii = speed() - timestampi
+
+        const reply = async (text) => {
+            // Uses the locally defined 'range' function
+            for (var x of range(0, text.length, 4096)) { //maks 4096 character, jika lebih akan eror
+                return await XeonBotInc.replyWithMarkdown(text.substr(x, 4096), {
+                    disable_web_page_preview: true
+                })
+            }
+        }
+        const getStyle = (style_, style, style2) => {
+            // Assuming lang.getStyle is available globally or imported
+            listt = `${lang.getStyle(style, style2)}`
+            for (var i = 0; i < 300; i++) {
+                listt += '» `' + style_[i] + '`\n'
+            }
+            reply(listt)
+        }
+
+        //get type message
+        var typeMessage = body.substr(0, 50).replace(/\n/g, '')
+        if (isImage) typeMessage = 'Image'
+        else if (isVideo) typeMessage = 'Video'
+        else if (isAudio) typeMessage = 'Audio'
+        else if (isSticker) typeMessage = 'Sticker'
+        else if (isContact) typeMessage = 'Contact'
+        else if (isLocation) typeMessage = 'Location'
+        else if (isDocument) typeMessage = 'Document'
+        else if (isAnimation) typeMessage = 'Animation'
+
+        //push message to console
+        if (XeonBotInc.message) {
+            console.log(chalk.black(chalk.bgWhite('[ CMD ]')), chalk.black(chalk.bgGreen(new Date)), chalk.black(chalk.bgBlue(body || typeMessage)) + '\n' + chalk.magenta('=> From'), chalk.green(pushname) + '\n' + chalk.blueBright('=> In'), chalk.green(isGroup ? groupName : 'Private Chat', XeonBotInc.message.chat.id))
+        }
+
+        const sendMessage = (chatId, text) => bot.sendMessage(chatId, text);
+
+        function generateRandomPassword() {
+            const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#%^&*';
+            const length = 10;
+            let password = '';
+            for (let i = 0; i < length; i++) {
+                const randomIndex = Math.floor(Math.random() * characters.length);
+                password += characters[randomIndex];
+            }
+            return password;
+        }
+
+        switch (command) {
+            case 'enc':
+            case 'encrypt': {
+                // Check if the user is a developer
+                if (!DEVELOPER.includes(userId)) {
+                    // Cooldown check for non-developer users
+                    if (cooldowns.has(userId)) {
+                        const lastUsed = cooldowns.get(userId);
+                        const now = Date.now();
+                        const timeLeft = 30000 - (now - lastUsed); // 30 seconds cooldown
+
+                        if (timeLeft > 0) {
+                            return XeonBotInc.reply(`Please wait ${Math.ceil(timeLeft / 1000)} seconds before using the command again.`);
+                        }
+                    }
+                }
+
+                const isOwner = global.DEVELOPER.includes(XeonBotInc.message.from.id.toString());
+                if (!isOwner) {
+                    return XeonBotInc.reply(`Please use the command /pair and connect the bot to your messenger whatsapp.`);
+                }
+
+                const JSConfuser = require("js-confuser");
+
+                const usage = `Usage Example:
+${prefix + command} (Input text or reply text to obfuscate code)
+${prefix + command} doc (Reply to a document)`;
+
+                let text;
+                if (args.length >= 1) {
+                    text = args.join(" ");
+                } else if (XeonBotInc.message.reply_to_message && XeonBotInc.message.reply_to_message.text) {
+                    text = XeonBotInc.message.reply_to_message.text;
+                } else {
+                    return reply(usage);
+                }
+
+                // Define the temporary directory path
+                const tmpDir = './tmp';
+                // Create the tmp directory if it doesn't exist
+                if (!fs.existsSync(tmpDir)) {
+                    fs.mkdirSync(tmpDir);
+                }
+
+                // Define the full path for the encrypted file inside tmp
+                const encryptedFilePath = path.join(tmpDir, 'enc_by_@Matrixxxxxxxxx.js');
+
+                try {
+                    let code;
+                    if (text === 'doc' && XeonBotInc.message.reply_to_message && XeonBotInc.message.reply_to_message.document) {
+                        const fileLink = await bot.telegram.getFileLink(XeonBotInc.message.reply_to_message.document.file_id);
+                        const response = await axios.get(fileLink.href, {
+                            responseType: 'arraybuffer'
+                        });
+                        code = Buffer.from(response.data).toString('utf-8');
+                    } else {
+                        code = text;
+                    }
+
+                    const optionsObf6 = {
+                        target: "node",
+                        preset: "high",
+                        compact: true,
+                        minify: true,
+                        flatten: true,
+
+                        identifierGenerator: function() {
+                            const originalString =
+                                "素晴座素晴難ADIZA素晴座素晴難" +
+                                "素晴座素晴難ADIZA素晴座素晴難";
+
+                            // Fungsi untuk menghapus karakter yang tidak diinginkan
+                            function removeUnwantedChars(input) {
+                                return input.replace(
+                                    /[^a-zA-Z座Nandokuka素Muzukashī素晴]/g, ''
+                                );
+                            }
+
+                            // Fungsi untuk menghasilkan string acak
+                            function randomString(length) {
+                                let result = '';
+                                const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'; // Hanya simbol
+                                const charactersLength = characters.length;
+
+                                for (let i = 0; i < length; i++) {
+                                    result += characters.charAt(
+                                        Math.floor(Math.random() * charactersLength)
+                                    );
+                                }
+                                return result;
+                            }
+
+                            return removeUnwantedChars(originalString) + randomString(2);
+                        },
+
+                        renameVariables: true,
+                        renameGlobals: true,
+
+                        stringEncoding: true,
+                        stringSplitting: 0.0,
+                        stringConcealing: true,
+                        stringCompression: true,
+                        duplicateLiteralsRemoval: 1.0,
+
+                        shuffle: {
+                            hash: 0.0,
+                            true: 0.0
+                        },
+
+                        stack: true,
+                        controlFlowFlattening: 1.0,
+                        opaquePredicates: 0.9,
+                        deadCode: 0.0,
+                        dispatcher: true,
+                        rgf: false,
+                        calculator: true,
+                        hexadecimalNumbers: true,
+                        movedDeclarations: true,
+                        objectExtraction: true,
+                        globalConcealing: true
+                    };
+
+                    const obfuscatedCode = await JSConfuser.obfuscate(code, optionsObf6);
+
+                    // Write the encrypted code to the file in the tmp directory
+                    fs.writeFileSync(encryptedFilePath, obfuscatedCode);
+
+                    // Send the document
+                    await bot.telegram.sendDocument(XeonBotInc.message.chat.id, {
+                        source: encryptedFilePath,
+                        filename: 'Encrypted By @Matrixxxxxxxxx.js'
+                    });
+
+                    // Clean up the temporary file immediately after sending
+                    fs.unlinkSync(encryptedFilePath);
+
+
+                } catch (error) {
+                    console.error('Error during encryption:', error);
+                    // Ensure the temporary file is deleted even if an error occurs during processing or sending
+                    if (fs.existsSync(encryptedFilePath)) {
+                        fs.unlinkSync(encryptedFilePath);
+                    }
+                    return reply(`Error: ${error.message}`);
+                }
+                // Set cooldown for non-developer users
+                if (!DEVELOPER.includes(userId)) {
+                    cooldowns.set(userId, Date.now());
+                    setTimeout(() => cooldowns.delete(userId), 30000); // Clear the cooldown after 30 seconds
+                }
+                break; // ADDED break statement
+            }
+
+            // =========== DECRYPT ========= //
+
+            case 'dec':
+            case 'decrypt': {
+                // Check if the user is a developer
+                if (!DEVELOPER.includes(userId)) {
+                    // Cooldown check for non-developer users
+                    if (cooldowns.has(userId)) {
+                        const lastUsed = cooldowns.get(userId);
+                        const now = Date.now();
+                        const timeLeft = 30000 - (now - lastUsed); // 30 seconds cooldown
+
+                        if (timeLeft > 0) {
+                            return XeonBotInc.reply(`Please wait ${Math.ceil(timeLeft / 1000)} seconds before using the command again.`);
+                        }
+                    }
+                }
+
+                const isOwner = global.DEVELOPER.includes(XeonBotInc.message.from.id.toString());
+                if (!isOwner) {
+                    return XeonBotInc.reply(`Please use the command /pair and connect the bot to your messenger whatsapp.`);
+                }
+
+                // Ensure webcrack is imported if this block is uncommented
+                const {
+                    webcrack
+                } = await import('webcrack'); // This requires Node.js v14+ and appropriate module setup
+
+                const usage = `Usage Example:
+${prefix + command} (Input text or reply text to decrypt code)
+${prefix + command} doc (Reply to a document)`;
+
+                let text;
+                if (args.length >= 1) {
+                    text = args.join(" ");
+                } else if (quotedMessage?.text) {
+                    text = quotedMessage.text;
+                } else if (isQuotedDocument) {
+                    const fileId = quotedMessage.document.file_id;
+                    const fileLink = await bot.telegram.getFileLink(fileId);
+                    const fileBuffer = await axios.get(fileLink.href, {
+                        responseType: 'arraybuffer'
+                    });
+                    text = fileBuffer.data.toString('utf-8');
+                } else {
+                    return reply(usage);
+                }
+
+                // Define the temporary directory path
+                const tmpDir = './tmp';
+                // Create the tmp directory if it doesn't exist
+                if (!fs.existsSync(tmpDir)) {
+                    fs.mkdirSync(tmpDir);
+                }
+
+                // Define the full path for the decrypted file inside tmp
+                const decryptedFilePath = path.join(tmpDir, 'dec_by_bot.js');
+
+                try {
+                    const decryptedCode = await webcrack(text);
+
+                    // Write the decrypted code to the file in the tmp directory
+                    fs.writeFileSync(decryptedFilePath, decryptedCode.code);
+
+                    // Send the document
+                    await bot.telegram.sendDocument(from, {
+                        source: decryptedFilePath,
+                        filename: 'Decrypted_By_Adiza.js'
+                    });
+
+                    // Clean up the temporary file immediately after sending
+                    fs.unlinkSync(decryptedFilePath);
+
+                } catch (error) {
+                    console.error('Error during decryption:', error);
+                    // Ensure the temporary file is deleted even if an error occurs during processing or sending
+                    if (fs.existsSync(decryptedFilePath)) {
+                        fs.unlinkSync(decryptedFilePath);
+                    }
+                    return reply(`There was an error: ${error.message}`);
+                }
+                // Set cooldown for non-developer users
+                if (!DEVELOPER.includes(userId)) {
+                    cooldowns.set(userId, Date.now());
+                    setTimeout(() => cooldowns.delete(userId), 30000); // Clear the cooldown after 30 seconds
+
+                }
+                break; // ADDED break statement
+            }
+
+            case 'listpair': {
+                const isOwner = global.DEVELOPER.includes(XeonBotInc.message.from.id.toString()); // Re-using isOwner for developer check
+                if (!isOwner) {
+                    return XeonBotInc.reply(`This command is only for owner.`);
+                }
+
+                const pairingPath = './lib2/pairing';
+
+                try {
+                    // Check if the directory exists
+                    if (!fs.existsSync(pairingPath)) {
+                        return XeonBotInc.reply('No paired devices found.');
+                    }
+
+                    // Read all directories (and files) inside ./lib2/pairing
+                    const entries = fs.readdirSync(pairingPath, {
+                        withFileTypes: true
+                    });
+
+                    // Filter for directories (paired device IDs)
+                    const pairedDevices = entries
+                        .filter(entry => entry.isDirectory())
+                        .map(entry => entry.name.replace('@s.whatsapp.net', '')); // Extract only numbers
+
+                    // Handle if no paired devices are found
+                    if (pairedDevices.length === 0) {
+                        return XeonBotInc.reply('No paired devices found.');
+                    }
+
+                    // Count total paired devices
+                    const totalUsers = pairedDevices.length;
+
+                    // Format the list of paired devices for the response
+                    const deviceList = pairedDevices
+                        .map((device, index) => `${index + 1}. ${device}`)
+                        .join('\n');
+
+                    XeonBotInc.reply(`Total Rent Bot Users: ${totalUsers}\n\nPaired Devices:\n${deviceList}`);
+                } catch (err) {
+                    console.error('Error reading paired devices directory:', err);
+                    return XeonBotInc.reply('Failed to load paired devices data.');
+                }
+                break;
+            }
+
+            case 'listprem': {
+                const isOwner = global.DEVELOPER.includes(userId) || global.OWNER.includes(
+                    XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+                );
+                if (!isOwner) return reply('Only owners can list premium users.');
+                if (adminIDs.length === 0) return reply('No premium users.');
+                reply('Premium Users:\n' + adminIDs.map((id, i) => `${i+1}. <code>${id}</code>`).join('\n'), {
+                    parse_mode: "HTML"
+                });
+                break;
+            }
+
+            case 'delpair': {
+
+    const isAuthorized = global.DEVELOPER.includes(userId) ||
+                         global.OWNER.includes(XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : '') ||
+                         isPremiumUser(userId); // <--- ADDED THIS PART
+
+    if (!isAuthorized) {
+        // Updated reply message to reflect broader authorization
+        return XeonBotInc.reply(`This command is only for authorized users (Owner/Developer/Premium).`);
+    }
+
+    if (!text) return XeonBotInc.reply(`Example:\n ${prefix + command} 91xxx`)
+    target = text.split("|")[0]
+    const Xreturn = XeonBotInc.message.reply_to_message ? XeonBotInc.message.reply_to_message.from.id + "@s.whatsapp.net" // Append @s.whatsapp.net for JID
+        : target.replace(/[^0-9]/g, '') + "@s.whatsapp.net"; // Ensure it's a JID
+    // var contactInfo1 =  Xreturn; // This line is not used.
+
+    const targetID = Xreturn; // Already a JID
+    const pairingPath = './lib2/pairing';
+    const targetPath = `${pairingPath}/${targetID}`; // Use targetID as it's the full JID
+
+    try {
+        // Check if the target directory exists
+        if (!fs.existsSync(targetPath)) {
+            return XeonBotInc.reply(`Paired device with ID "${targetID}" does not exist.`);
+        }
+
+        // Delete the target directory and its contents
+        fs.rmSync(targetPath, {
+            recursive: true,
+            force: true
+        });
+
+        XeonBotInc.reply(`Paired device with ID "${targetID}" has been successfully deleted.`);
+    } catch (err) {
+        console.error('Error deleting paired device:', err);
+        return XeonBotInc.reply('An error occurred while attempting to delete the paired device.');
+    }
+    break;
+}
+
+
+
+            case 'pair': {
+    const libphonenumber = require('libphonenumber-js');
+    const fs = require('fs');
+    const path = require('path');
+    const chalk = require('chalk');
+
+    const isAuthorized = global.DEVELOPER.includes(userId) ||
+                         global.OWNER.includes(XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : '') ||
+                         isPremiumUser(userId);
+
+    const escapedUserID = escapeMarkdownV2(userId);
+
+    if (!isAuthorized) {
+        return XeonBotInc.telegram.sendMessage(
+            XeonBotInc.chat.id,
+            `🚫 <b>You are not authorized to use this command.</b>\n\n` +
+            `📌 To gain access, follow these steps:\n` +
+            `1. Join my Telegram channel\n` +
+            `2. Join Adiza Telegram Bot\n` +
+            `3. Follow my WhatsApp channel\n\n` +
+            `📤 After completing these steps, send screenshots as proof along with your User ID:\n\n` +
+            `<code> ${escapedUserID} </code>\n\n` +
+            `📩 <b>Send proof to the owner @Matrixxxxxxxxx</b>`, {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📢 Telegram Channel", url: "https://t.me/QueenAdiza" }],
+                        [{ text: "▶️Adiza Bot", url: "https://t.me/QueenAdiza_bot" }],
+                        [{ text: "📱 WhatsApp Channel", url: "https://whatsapp.com/channel/0029Vb5JJ438kyyGlFHTyZ0n" }]
+                    ]
+                },
+                parse_mode: "HTML"
+            }
+        );
+    }
+
+    const freeStorage = os.freemem() / (1024 * 1024);
+    if (freeStorage < 300) {
+        return XeonBotInc.reply('Slot is full, please try again later.');
+    }
+
+    if (!global.DEVELOPER.includes(userId)) {
+        if (cooldowns.has(userId)) {
+            const lastUsed = cooldowns.get(userId);
+            const now = Date.now();
+            const timeLeft = 30000 - (now - lastUsed);
+
+            if (timeLeft > 0) {
+                return XeonBotInc.reply(`Please wait ${Math.ceil(timeLeft / 1000)} seconds before using the command again.`);
+            }
+        }
+    }
+
+    if (!text) {
+        return XeonBotInc.reply('Please provide a number for requesting the pair code. Usage: /pair <number>');
+    }
+
+    const sanitizedNumber = text.replace(/\D/g, '');
+
+    function isValidWhatsAppNumber(phone) {
+        try {
+            const number = libphonenumber.parsePhoneNumber('+' + phone);
+            if (!number || !number.isValid()) return false;
+            const localNumberLength = number.nationalNumber.length;
+            return localNumberLength >= 6 && localNumberLength <= 15;
+        } catch {
+            return false;
+        }
+    }
+
+    if (!isValidWhatsAppNumber(sanitizedNumber)) {
+        return XeonBotInc.reply('Invalid WhatsApp number. Please enter a valid phone number.');
+    }
+
+    const Xreturn = sanitizedNumber + "@s.whatsapp.net";
+
+    await XeonBotInc.reply("Initiating pairing... Please wait. This might take a moment.");
+
+    // --- ADDED FIX: Use absolute path and ensure the base pairing directory exists ---
+    const pairingBaseDir = path.join(__dirname, 'lib2', 'pairing');
+    if (!fs.existsSync(pairingBaseDir)) {
+        fs.mkdirSync(pairingBaseDir, { recursive: true });
+        console.log(chalk.green(`[MATRIXTELE] Created base pairing directory: ${pairingBaseDir}`));
+    }
+    // --- END ADDED FIX ---
+
+    const startpairing = require('./rentbot.js');
+    await startpairing(Xreturn);
+
+    await sleep(3000);
+
+    try {
+        const pairingFilePath = path.join(pairingBaseDir, 'pairing.json');
+        if (!fs.existsSync(pairingFilePath)) {
+            console.error("Pairing file not found after initiating pairing.");
+            return XeonBotInc.reply("Failed to get pairing code. The session file wasn't created. Please try again.");
+        }
+
+        const cu = fs.readFileSync(pairingFilePath, 'utf-8');
+        const cuObj = JSON.parse(cu);
+        const pairingCode = cuObj.code;
+
+        if (!pairingCode) {
+            return XeonBotInc.reply("Failed to get pairing code. The code was not found in the session file.");
+        }
+
+        const formattedMessage = `🚀🔮<b>𝙌𝙪𝙚𝙚𝙣 𝘼𝙙𝙞𝙯𝙖 𝘽𝙤𝙩</b>🔮🚀\n\n` +
+            `🔑 <b>Pairing Code:</b> <code>${pairingCode}</code>\n\n` +
+            `📌 <b>How to use this code:</b>📌\n\n` +
+            `1. Open WhatsApp > Settings > Linked Devices\n` +
+            `2. Tap "Link a Device"\n` +
+            `3. Select "Link with phone number instead"\n` +
+            `3. Enter this 8-digit code\n\n` +
+            `⏳<b>Code expires in 2 mins</b>⏳`;
+
+        await XeonBotInc.telegram.sendMessage(XeonBotInc.chat.id, formattedMessage, {
+            parse_mode: 'HTML'
+        });
+
+    } catch (readError) {
+        console.error("Error reading pairing.json or sending message:", readError);
+        XeonBotInc.reply("Failed to get pairing code. An internal error occurred.");
+    }
+
+    if (!global.DEVELOPER.includes(userId)) {
+        cooldowns.set(userId, Date.now());
+        setTimeout(() => cooldowns.delete(userId), 30000);
+    }
+    break;
+}
+
+
+           
+case 'addprem': {
+    // RE-ADDED OWNER/DEVELOPER CHECK
+    const isOwner = global.DEVELOPER.includes(userId) || global.OWNER.includes(
+        XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+    );
+    if (!isOwner) return reply('Only owners can add premium users.');
+
+    if (!text) return reply('Usage: /addprem <telegram_id>');
+    const newId = text.trim();
+
+    if (newId === "") {
+        return reply("Please provide a valid Telegram ID. It cannot be empty.");
+    }
+
+    // Use the dynamically updated adminIDs (from the fs.watchFile listener)
+    if (!adminIDs.includes(newId)) {
+        adminIDs.push(newId);
+        // Writing to file will trigger fs.watchFile, which then reloads adminIDs in memory
+        fs.writeFileSync(adminfile, JSON.stringify(adminIDs, null, 2));
+
+        reply(`✅ Added <code>${newId}</code> as a premium user.`, {
+            parse_mode: "HTML"
+        });
+    } else {
+        reply('User is already premium.');
+    }
+    break;
+}
+
+            case 'delprem': {
+    // RE-ADDED OWNER/DEVELOPER CHECK
+    const isOwner = global.DEVELOPER.includes(userId) || global.OWNER.includes(
+        XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+    );
+    if (!isOwner) return reply('Only owners can remove premium users.');
+
+    if (!text) return reply('Usage: /delprem <telegram_id>');
+    const delId = text.trim();
+    const idx = adminIDs.indexOf(delId);
+
+    if (idx !== -1) {
+        adminIDs.splice(idx, 1);
+        // Write updated list to file; fs.watchFile will reload adminIDs automatically
+        fs.writeFileSync(adminfile, JSON.stringify(adminIDs, null, 2));
+
+        reply(`✅ Removed <code>${delId}</code> from premium users.`, {
+            parse_mode: "HTML"
+        });
+    } else {
+        reply('User is not in the premium list.');
+    }
+    break;
+}
+
+
+            case 'listusers': {
+                // Authorization check: Only Owner/Developer can use this
+                const isOwnerOrDeveloper = global.DEVELOPER.includes(userId) || global.OWNER.includes(
+                    XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+                );
+                if (!isOwnerOrDeveloper) {
+                    return reply('This command is only for the owner/developer.');
+                }
+
+                try {
+                    // Construct the path to users.json. Assuming it's in the same directory as matrixtele.js
+                    const usersFile = path.join(__dirname, 'users.json'); 
+
+                    let users = [];
+                    if (fs.existsSync(usersFile)) {
+                        const data = fs.readFileSync(usersFile, 'utf8');
+                        users = JSON.parse(data);
+                    } else {
+                        return reply('`users.json` file not found in the bot\'s root directory.');
+                    }
+
+                    if (users.length === 0) {
+                        return reply('No users recorded in `users.json` yet.');
+                    }
+
+                    let userListMessage = `👥 *Total Users: ${users.length}*\n\n`;
+                    userListMessage += 'Users:\n';
+                    userListMessage += users.map((id, i) => `${i + 1}. \`${id}\``).join('\n');
+
+                    // The `reply` function in matrixtele.js already handles splitting long messages.
+                    reply(userListMessage);
+
+                } catch (error) {
+                    console.error('Error listing users from users.json:', error);
+                    reply('An error occurred while trying to list users.');
+                }
+ break; 
+  }     
+  
+
+    case 'restart': {
+        // Authorization check: Only Owner/Developer can use this
+        const isOwnerOrDeveloper = global.DEVELOPER.includes(userId) || global.OWNER.includes(
+            XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+        );
+        if (!isOwnerOrDeveloper) {
+            return reply('You are not authorized to use this command.');
+        }
+
+        await reply('🔄 Restarting bot...');
+        console.log(chalk.yellow('[BOT] Restarting initiated by Telegram command...'));
+
+        
+        process.exit(0);
+
+    
+    break;
+ }
+            
+
+            case 'runtime': {
+                // XeonBotInc.deleteMessage().catch(() => {}); // This might not be needed or could error
+                reply(`𝗤𝘂𝗲𝗲𝗻 𝗔𝗱𝗶𝘇𝗮 𝗕𝗼𝘁 𝗶𝘀 𝗢𝗻𝗹𝗶𝗻𝗲 ${runtime(process.uptime())}`)
+                break;
+            }
+            case 'menu':
+            case 'back!':
+                const totalMem = os.totalmem();
+                const freeMem = os.freemem();
+                const usedMem = totalMem - freeMem;
+                const formattedUsedMem = formatSize(usedMem);
+                const ramPercentage = (usedMem / totalMem * 100).toFixed(2);
+                const formattedTotalMem = formatSize(totalMem);
+                const currentTime = moment.tz(timezones).format('HH:mm:ss z');
+                const currentDate = moment.tz(timezones).format('DD/MM/YYYY');
+
+                let xeontext =
+
+`Hi 👋
+╭───⌈ HEY,${pushname} ⌋───╮
+│ 🤡🏜𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔-𝗕𝗢𝗧🏜🤡
+╰────────────────────╯
+
+╭─〔👤 𝗕𝗢𝗧 𝗜𝗡𝗙𝗢 👤〕─────╮
+┃ 🔢  𝙑𝙚𝙧𝙨𝙞𝙤𝙣: V.9
+┃ ❄  𝘽𝙤𝙩: ${global.BOT_NAME}
+┃ 🆔  𝙄𝙙: ${global.DEVELOPER[0]}
+┃ ⏰ 𝙏𝙞𝙢𝙚: ${currentTime}
+┃ 🗓️ 𝘿𝙖𝙩𝙚: ${currentDate}
+┃ 💾  𝙍𝘼𝙈: ${formattedTotalMem} 
+┃ 🇬🇭 𝙊𝙬𝙣𝙚𝙧: ${global.OWNER_NAME}
+╰────────────────────╯
+
+╭─〔💎 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗨𝗦𝗘𝗥𝗦 💎〕─╮
+┃ ⏳ /pair — 𝘼𝙙𝙙 𝙖 𝙣𝙚𝙬 𝙒𝘼 𝙨𝙚𝙨𝙨𝙞𝙤𝙣
+┃ 🚫 /delpair — 𝙍𝙚𝙢𝙤𝙫𝙚 𝙖 𝙨𝙚𝙨𝙨𝙞𝙤𝙣 
+┃ ❄ /runtime — 𝘽𝙤𝙩 𝙐𝙥𝙩𝙞𝙢𝙚
+┃⚡ /checkid — 𝘾𝙝𝙚𝙘𝙠 𝙔𝙤𝙪𝙧 𝙄𝘿
+╰─────────────────────╯
+
+╭─〔 👑 𝗢𝗪𝗡𝗘𝗥 👑 〕───╮
+┃ 🔮 /addprem — 𝘼𝙙𝙙 𝙥𝙧𝙚𝙢𝙪𝙨𝙚𝙧
+┃ ♨️ /delprem — 𝙍𝙚𝙢𝙤𝙫𝙚 𝙥𝙧𝙚𝙢𝙪𝙨𝙚𝙧
+┃ 🦠 /listprem — 𝙇𝙞𝙨𝙩 𝙥𝙧𝙚𝙢𝙪𝙨𝙚𝙧𝙨
+┃ 🎨 /broadcast —  𝙈𝙚𝙨𝙨𝙖𝙜𝙚
+┃ 👥 /listusers  — 𝙇𝙞𝙨𝙩 𝙪𝙨𝙚𝙧𝙨
+┃ 💎 /listpair — 𝙇𝙞𝙨𝙩 𝙋𝙖𝙞𝙧 𝙪𝙨𝙚𝙧𝙨
+┃ 🔄 /restart — 𝙍𝙚𝙨𝙩𝙖𝙧𝙩 𝙑𝙋𝙎
+╰───────────────────╯`
+                XeonBotInc.replyWithPhoto(
+                    global.pp, {
+                        caption: xeontext
+                    }
+                );
+                break
+            default:
+        }
+    } catch (e) {
+        XeonBotInc.reply(util.format(e))
+        console.log('[ ERROR ] ' + e)
+    }
+}
+
+let file = require.resolve(__filename)
+fs.watchFile(file, () => {
+    fs.unwatchFile(file)
+    console.log(chalk.redBright(`Update ${__filename}`))
+    delete require.cache[file]
+    require(file)
+})
