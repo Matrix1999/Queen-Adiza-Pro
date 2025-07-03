@@ -904,12 +904,17 @@ module.exports = [ {
       reply(`Error fetching ringtone: ${error.message}`);
     }
   }
-}, {
-  command: ['savestatus', 'save'],
-  operate: async ({ m, saveStatusMessage }) => {
-    await saveStatusMessage(m);
-  }
-},  {
+}, 
+  {
+    command: ['savestatus', 'save'],
+    operate: async ({ m, args, saveStatusMessage }) => {
+
+      const saveToDM = args.includes('dm') || args.includes('me');       
+
+      await saveStatusMessage(m, saveToDM);
+    }
+  },
+ {
   command: ["tiktok", "tikdl", "tiktokvideo"],
   operate: async ({
     m,           // Message object

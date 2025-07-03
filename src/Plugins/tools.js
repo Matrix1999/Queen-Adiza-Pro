@@ -71,28 +71,28 @@ module.exports = [
     if (!m.quoted) {
       return reply('*Please quote a message to use this command!*');
     }
-    
-    console.log('Quoted Message:', m.quoted);
-console.log('Quoted Key:', m.quoted?.key);
 
-    try {
-      const quotedMsg = await m.getQuotedMessage();
+    // Try to get ID and sender from quoted message, fallback to contextInfo if needed
+    let messageId = m.quoted.key && m.quoted.key.id;
+    let senderId = m.quoted.key && m.quoted.key.participant;
 
-      if (!quotedMsg) {
-        return reply('*Could not detect, please try with newly sent message!*');
-      }
-
-      const messageId = quotedMsg.key.id;
-
-      const device = getDevice(messageId) || 'Unknown';
-
-      reply(`The message is sent from *${device}* device.`);
-    } catch (err) {
-      console.error('Error determining device:', err);
-      reply('Error determining device: ' + err.message);
+    // Fallback: Try to get from contextInfo
+    if (!messageId && m.quoted.message?.extendedTextMessage?.contextInfo) {
+      messageId = m.quoted.message.extendedTextMessage.contextInfo.stanzaId;
+      senderId = m.quoted.message.extendedTextMessage.contextInfo.participant;
     }
+
+    if (!messageId) {
+      return reply('*Could not detect, please try with a newly sent message!*');
+    }
+
+    const device = getDevice(messageId) || 'Unknown';
+
+    reply(`The message is sent from *${device}* device.`);
   }
-}, {
+}, 
+
+{
   command: ["obfuscate"],
   operate: async ({ Matrix, m, text, reply }) => {
     if (!text) {
@@ -282,26 +282,7 @@ console.log('Quoted Key:', m.quoted?.key);
   tags: ["tools"],
   help: ["virustotal [url]"],
   operate: async ({ m, reply, args, Matrix }) => {
-    // --- Premium Check for VirusTotal ---
-    const userId = m.sender;
-    const serviceName = 'virustotal'; // Define a service name for this command
 
-    premiumManager.registerService(serviceName); // Register the service
-
-    if (!premiumManager.isPremium(userId, serviceName)) {
-      if (Matrix && Matrix.sendMessage) {
-        await Matrix.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
-      } else if (m?.react) {
-        await m.react("🚫");
-      }
-      return reply(
-        `🚫 *Premium Required!*\n\n` +
-        `This feature is for premium users only.\n` +
-        `To use *${serviceName.toUpperCase()}*, you need an active premium subscription or All-Access Premium.\n\n` +
-        `Type *.buy_premium* to learn more.`
-      );
-    }
-    // --- End Premium Check ---
 
     const url = args[0];
     if (!url) {

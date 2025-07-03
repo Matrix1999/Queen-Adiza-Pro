@@ -1,13 +1,10 @@
 const axios = require('axios');
 const fs = require('fs-extra');
-
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const JsConfuser = require('js-confuser');
 const crypto = require('crypto');
-
 const { webcrack } = require('webcrack');
-
 const OWNER_NUMBER = '233593734312@s.whatsapp.net';
 
 const TEMP_DIR = path.join(__dirname, '..', '..', 'tmp');
@@ -49,7 +46,9 @@ async function updateProgress(MatrixInstance, m, percentage, status) {
   }
 }
 
-// --- Obfuscation Configs ---
+
+
+
 
 // --- Obfuscation Configs ---
 
@@ -177,6 +176,8 @@ function getJapanObfuscationConfig() {
   };
 }
 
+// enchector
+
 function getNebulaObfuscationConfig() {
   const generateNebulaName = () => {
     const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -215,6 +216,9 @@ function getNebulaObfuscationConfig() {
     }
   };
 }
+
+// encmatrix
+
 function getStrongObfuscationConfig() {
   return {
     target: "node",
@@ -239,6 +243,7 @@ function getStrongObfuscationConfig() {
   };
 }
 
+// encultra
 function getUltraObfuscationConfig() {
   const generateUltraName = () => {
     const chars = "abcdefghijklmnopqrstuvwxyz";
@@ -329,6 +334,7 @@ const obfuscateQuantum = async (fileContent) => {
   }
  };
  
+ // encnova
  // Konfigurasi obfuscation untuk Nova style
 const getNovaObfuscationConfig = () => {
     const generateNovaName = () => {
@@ -599,7 +605,6 @@ module.exports = [
   {
   command: ['encmatrix'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
-    // Debug log to inspect quoted message structure
     console.log('m.quoted:', m.quoted);
 
     if (!m.quoted) {
@@ -607,8 +612,9 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `matrix_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    // Use the original filename directly for the output file
+    const originalFileName = file.fileName || `matrix_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -636,13 +642,14 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_strong-encrypted${fileExt}`);
+    // Use originalFileName for the temp file path for clarity, though it doesn't affect output name
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_strong-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -651,7 +658,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -671,22 +678,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Strong): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and desired caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `strong-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Strong) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName, // Use the original filename
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Strong) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Strong Obfuscation Completed");
@@ -710,7 +722,6 @@ module.exports = [
 }, {
   command: ['encultra'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
-    // Debug log to inspect quoted message structure
     console.log('m.quoted:', m.quoted);
 
     if (!m.quoted) {
@@ -718,8 +729,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `ultra_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `ultra_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -747,13 +758,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_ultra-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_ultra-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -762,7 +773,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -782,22 +793,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Ultra): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `ultra-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Ultra) ready!*\nSUCCESSFULLY ENCRYPTED BY ULTRA 💎",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Ultra) ready!*\nSUCCESSFULLY ENCRYPTED BY ULTRA 💎"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Ultra Obfuscation Completed");
@@ -821,24 +837,20 @@ module.exports = [
 }, {
   command: ['encarab'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
-    // Debug log to inspect quoted message structure
     console.log('m.quoted:', m.quoted);
 
-    // Check if user replied to a message containing a document
     if (!m.quoted) {
       return reply(escapeMarkdownV2("❌ Error: Reply to a .js file with this command!"));
     }
 
-    const file = m.quoted; // Use m.quoted directly as the document
-    const fileName = file.fileName || `arab_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const file = m.quoted;
+    const originalFileName = file.fileName || `arab_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
-    // Validate file extension
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
     }
 
-    // Handle file size from Long object (use .low)
     const fileSize = file.fileLength?.low || 0;
     if (fileSize > MAX_FILE_SIZE) {
       return reply(escapeMarkdownV2(`❌ Error: File too large. Max size: ${MAX_FILE_SIZE / (1024 * 1024)}MB`));
@@ -861,13 +873,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_arab-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_arab-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -876,7 +888,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -896,22 +908,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Arab): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `arab-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Arab) ready!*\nSUCCESSFULLY ENCRYPTED BY ENCARAB🧙‍♂️",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Arab) ready!*\nSUCCESSFULLY ENCRYPTED BY ENCARAB🧙‍♂️"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Arab Obfuscation Completed");
@@ -942,8 +959,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `japxarab_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `japxarab_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -971,13 +988,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_japanxarab-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_japanxarab-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -986,7 +1003,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1006,22 +1023,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Japan X Arab): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `japanxarab-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Japan X Arab) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Japan X Arab) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Japan X Arab Obfuscation Completed");
@@ -1071,7 +1093,6 @@ module.exports = [
     const userId = m.sender;
     const serviceName = 'decrypt';
 
-   /*
     premiumManager.registerService(serviceName);
     if (userId === OWNER_NUMBER) {
       console.log('[DEBUG] Owner detected, bypassing premium check for decrypt.');
@@ -1084,7 +1105,6 @@ module.exports = [
         `Type *.buy_premium* to learn more.`
       );
     }
-     */
 
     await fs.ensureDir(TEMP_DIR);
     const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_encrypted${fileExt}`);
@@ -1133,15 +1153,22 @@ module.exports = [
 
       await updateProgress(MatrixInstance, m, 80, "Saving Result");
 
-      console.log(`Sending decrypted file: ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read decrypted file buffer
+      const decryptedBuffer = await fs.readFile(decryptedPath);
+
+      // Compose decrypted filename with prefix
+      const decryptedFileName = `decrypted-${fileName}`;
+
+      console.log(`Sending decrypted file: ${decryptedFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        decryptedPath,
-        `decrypted-${fileName}`,
-        "✅ Decrypted file successfully ready!\nSUCCESSFULLY DECRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: decryptedBuffer,
+          fileName: decryptedFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ Decrypted file successfully ready!\nSUCCESSFULLY DECRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Decryption Completed");
@@ -1162,7 +1189,8 @@ module.exports = [
       }
     }
   }
-}, {
+}, 
+ {
   command: ['enchector'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
     console.log('m.quoted:', m.quoted);
@@ -1172,8 +1200,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `hector_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `hector_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1201,13 +1229,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_hector-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_hector-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1216,7 +1244,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1226,7 +1254,7 @@ module.exports = [
 
       log(`Encrypting file using Hector config`);
       await updateProgress(MatrixInstance, m, 40, "Initialization Hardened Hector Obfuscation");
-      const obfuscated = await JsConfuser.obfuscate(originalContent, getStrongObfuscationConfig()); // Adjust config if you have a specific one for enchector
+      const obfuscated = await JsConfuser.obfuscate(originalContent, getStrongObfuscationConfig()); // Adjust config if needed
       const obfuscatedCode = obfuscated.code || obfuscated;
       if (typeof obfuscatedCode !== "string") {
         throw new Error("Obfuscation result is not a string");
@@ -1236,22 +1264,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Hector): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `hector-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Hector) ready!*\nSUCCESSFULLY ENCRYPTED BY HECTOR☠️",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Hector) ready!*\nSUCCESSFULLY ENCRYPTED BY HECTOR☠️"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Hector Obfuscation Completed");
@@ -1272,7 +1305,8 @@ module.exports = [
       }
     }
   }
-}, {
+}, 
+{
   command: ['encinvisible'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
     console.log('m.quoted:', m.quoted);
@@ -1282,8 +1316,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `invisible_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `invisible_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1311,13 +1345,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_invisible-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_invisible-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1326,7 +1360,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1346,22 +1380,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Invisible): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `invisible-encrypted-${fileName}`,
-        "✅ *Encrypted file (Invisible) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Invisible) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Invisible Obfuscation Completed");
@@ -1392,8 +1431,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `stealth_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `stealth_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1421,13 +1460,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_stealth-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_stealth-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1436,7 +1475,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1456,22 +1495,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Stealth): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `stealth-encrypted-${fileName}`,
-        "✅ *Encrypted file (Stealth) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🦧",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Stealth) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🦧"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Stealth Obfuscation Completed");
@@ -1492,7 +1536,8 @@ module.exports = [
       }
     }
   }
-}, {
+}, 
+ {
   command: ['dracula'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
     console.log('m.quoted:', m.quoted);
@@ -1502,8 +1547,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `dracula_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `dracula_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1531,13 +1576,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_dracula-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_dracula-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1546,7 +1591,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1566,22 +1611,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Dracula): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `dracula-encrypted-${fileName}`,
-        "✅ *Encrypted file (Dracula) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 👑",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Dracula) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 👑"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Dracula Obfuscation Completed");
@@ -1602,7 +1652,8 @@ module.exports = [
       }
     }
   }
-}, {
+}, 
+ {
   command: ['encchina'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
     console.log('m.quoted:', m.quoted);
@@ -1612,8 +1663,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `mandarin_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `mandarin_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1641,13 +1692,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_mandarin-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_mandarin-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1656,7 +1707,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1676,22 +1727,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Mandarin): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `mandarin-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Mandarin) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Mandarin) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Mandarin Obfuscation Completed");
@@ -1710,9 +1766,10 @@ module.exports = [
       if (await fs.pathExists(encryptedPath)) {
         await fs.unlink(encryptedPath).catch(e => log(`Failed to delete temp encrypted file ${encryptedPath}: ${e.message}`));
       }
-    }  
+    }
   }
-}, {
+}, 
+ {
   command: ['immortal'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
     console.log('m.quoted:', m.quoted);
@@ -1722,8 +1779,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `siucalcrick_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `siucalcrick_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1739,7 +1796,7 @@ module.exports = [
 
     premiumManager.registerService(serviceName);
     if (userId === OWNER_NUMBER) {
-      log('[DEBUG] Owner detected, bypassing premium check for encsiucalcrick.');
+      log('[DEBUG] Owner detected, bypassing premium check for immortal.');
     } else if (!await premiumManager.isPremium(userId, serviceName)) {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
       return reply(
@@ -1751,13 +1808,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_siucalcrick-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_siucalcrick-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1766,7 +1823,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1786,22 +1843,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (SiuCalcrick): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `siucalcrick-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened SiuCalcrick) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened SiuCalcrick) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened SiuCalcrick Obfuscation Completed");
@@ -1832,8 +1894,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `quantum_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `quantum_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1861,13 +1923,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_quantum-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_quantum-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1876,7 +1938,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -1886,8 +1948,10 @@ module.exports = [
 
       log(`Encrypting file using Quantum config`);
       await updateProgress(MatrixInstance, m, 40, "Initialization Hardened Quantum Obfuscation");
-      const obfuscated = await JsConfuser.obfuscate(originalContent, getQuantumObfuscationConfig());
-      const obfuscatedCode = obfuscated.code || obfuscated;
+
+      // Use your obfuscateQuantum function here
+      const obfuscatedCode = await obfuscateQuantum(originalContent);
+
       if (typeof obfuscatedCode !== "string") {
         throw new Error("Obfuscation result is not a string");
       }
@@ -1896,22 +1960,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Quantum): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `quantum-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Quantum) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Quantum) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Quantum Obfuscation Completed");
@@ -1942,8 +2011,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `nova_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `nova_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -1971,13 +2040,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_nova-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_nova-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -1986,7 +2055,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -2006,22 +2075,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Nova): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `nova-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Nova) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Nova) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Nova Obfuscation Completed");
@@ -2041,118 +2115,9 @@ module.exports = [
         await fs.unlink(encryptedPath).catch(e => log(`Failed to delete temp encrypted file ${encryptedPath}: ${e.message}`));
       }
     }
-  } 
-}, {
-  command: ['encchina'],
-  operate: async ({ Matrix: MatrixInstance, m, reply }) => {
-    console.log('m.quoted:', m.quoted);
-
-    if (!m.quoted) {
-      return reply(escapeMarkdownV2("❌ Error: Reply to a .js file with this command!"));
-    }
-
-    const file = m.quoted;
-    const fileName = file.fileName || `china_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
-
-    if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
-      return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
-    }
-
-    const fileSize = file.fileLength?.low || 0;
-    if (fileSize > MAX_FILE_SIZE) {
-      return reply(escapeMarkdownV2(`❌ Error: File too large. Max size: ${MAX_FILE_SIZE / (1024 * 1024)}MB`));
-    }
-
-    const userId = m.sender;
-    const serviceName = 'encchina';
-
-    premiumManager.registerService(serviceName);
-    if (userId === OWNER_NUMBER) {
-      log('[DEBUG] Owner detected, bypassing premium check for encchina.');
-    } else if (!await premiumManager.isPremium(userId, serviceName)) {
-      await MatrixInstance.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
-      return reply(
-        `🚫 *Premium Required!*\n\n` +
-        `This feature is for premium users only.\n` +
-        `To use *${serviceName.toUpperCase()}*, you need an active premium subscription or All-Access Premium.\n\n` +
-        `Type *.buy_premium* to learn more.`
-      );
-    }
-
-    await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_china-encrypted${fileExt}`);
-
-    try {
-      await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
-
-      log(`Downloading file for obfuscation: ${fileName}`);
-      await updateProgress(MatrixInstance, m, 10, "Downloading");
-      const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
-      await fs.writeFile(tempFilePath, buffer);
-
-      await updateProgress(MatrixInstance, m, 20, "Download Completed");
-
-      const originalContent = await fs.readFile(tempFilePath, 'utf8');
-
-      log(`Validating initial code: ${fileName}`);
-      await updateProgress(MatrixInstance, m, 30, "Validating Code");
-      try {
-        new Function(originalContent);
-      } catch (syntaxError) {
-        throw new Error(`Invalid code: ${syntaxError.message}`);
-      }
-
-      log(`Encrypting file using China config`);
-      await updateProgress(MatrixInstance, m, 40, "Initialization Hardened China Obfuscation");
-      const obfuscated = await JsConfuser.obfuscate(originalContent, getChinaObfuscationConfig());
-      const obfuscatedCode = obfuscated.code || obfuscated;
-      if (typeof obfuscatedCode !== "string") {
-        throw new Error("Obfuscation result is not a string");
-      }
-
-      await updateProgress(MatrixInstance, m, 60, "Code Transformation");
-      await fs.writeFile(encryptedPath, obfuscatedCode);
-
-      await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
-      try {
-        new Function(obfuscatedCode);
-      } catch (postObfuscationError) {
-        throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
-      }
-
-      log(`Sending encrypted file (China): ${fileName}`);
-      await MatrixInstance.sendFile(
-        m.chat,
-        encryptedPath,
-        `china-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened China) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
-      );
-
-      await updateProgress(MatrixInstance, m, 100, "Hardened China Obfuscation Completed");
-      await MatrixInstance.sendMessage(m.chat, { react: { text: "✅", key: m.key } });
-
-    } catch (error) {
-      log("Error during obfuscation", error);
-      await MatrixInstance.sendMessage(m.chat, { react: { text: "❌", key: m.key } });
-      let errorMsg = error && error.message ? error.message : String(error);
-      if (typeof errorMsg !== 'string') errorMsg = JSON.stringify(errorMsg, null, 2);
-      await reply(escapeMarkdownV2(`❌ Error: ${errorMsg}\n_Try again with valid JavaScript code!_`));
-    } finally {
-      if (await fs.pathExists(tempFilePath)) {
-        await fs.unlink(tempFilePath).catch(e => log(`Failed to delete temp original file ${tempFilePath}: ${e.message}`));
-      }
-      if (await fs.pathExists(encryptedPath)) {
-        await fs.unlink(encryptedPath).catch(e => log(`Failed to delete temp encrypted file ${encryptedPath}: ${e.message}`));
-      }
-    }
   }
-}, {  
+}, 
+ {
   command: ['encvampire'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
     console.log('m.quoted:', m.quoted);
@@ -2162,8 +2127,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `vampire_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `vampire_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ *Error:* Only .js files are supported! Current: ${fileExt}`));
@@ -2191,13 +2156,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_vampire-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_vampire-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -2206,7 +2171,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -2216,7 +2181,8 @@ module.exports = [
 
       log(`Encrypting file using Vampire config`);
       await updateProgress(MatrixInstance, m, 40, "Initialization Hardened Vampire Obfuscation");
-      const obfuscated = await JsConfuser.obfuscate(originalContent, getVampireObfuscationConfig());
+      // Use your existing config function here:
+      const obfuscated = await JsConfuser.obfuscate(originalContent, getNewObfuscationConfig());
       const obfuscatedCode = obfuscated.code || obfuscated;
       if (typeof obfuscatedCode !== "string") {
         throw new Error("Obfuscation result is not a string");
@@ -2226,22 +2192,27 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Vampire): ${fileName}`);
-      await MatrixInstance.sendFile(
+      // Read encrypted file buffer
+      const encryptedBuffer = await fs.readFile(encryptedPath);
+
+      // Send as document with original filename and caption
+      log(`Sending encrypted file: ${originalFileName}`);
+      await MatrixInstance.sendMessage(
         m.chat,
-        encryptedPath,
-        `vampire-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Vampire) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
+        {
+          document: encryptedBuffer,
+          fileName: originalFileName,
+          mimetype: 'application/javascript',
+          caption: "✅ *Encrypted file (Hardened Vampire) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+        },
+        { quoted: m }
       );
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Vampire Obfuscation Completed");
@@ -2262,7 +2233,8 @@ module.exports = [
       }
     }
   }
-}, {
+},  
+{
   command: ['encjapan'],
   operate: async ({ Matrix: MatrixInstance, m, reply }) => {
     console.log('m.quoted:', m.quoted);
@@ -2272,8 +2244,8 @@ module.exports = [
     }
 
     const file = m.quoted;
-    const fileName = file.fileName || `japan_file_${Date.now()}.js`;
-    const fileExt = path.extname(fileName).toLowerCase();
+    const originalFileName = file.fileName || `japan_file_${Date.now()}.js`;
+    const fileExt = path.extname(originalFileName).toLowerCase();
 
     if (!ALLOWED_FILE_TYPES.includes(fileExt)) {
       return reply(escapeMarkdownV2(`❌ Error: Only .js files are supported! Current: ${fileExt}`));
@@ -2301,13 +2273,13 @@ module.exports = [
     }
 
     await fs.ensureDir(TEMP_DIR);
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original${fileExt}`);
-    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_japan-encrypted${fileExt}`);
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_original_${originalFileName}`);
+    const encryptedPath = path.join(TEMP_DIR, `${uuidv4()}_japan-encrypted_${originalFileName}`);
 
     try {
       await MatrixInstance.sendMessage(m.chat, { react: { text: "⏳", key: m.key } });
 
-      log(`Downloading file for obfuscation: ${fileName}`);
+      log(`Downloading file for obfuscation: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 10, "Downloading");
       const buffer = await MatrixInstance.downloadMediaMessage(m.quoted);
       await fs.writeFile(tempFilePath, buffer);
@@ -2316,7 +2288,7 @@ module.exports = [
 
       const originalContent = await fs.readFile(tempFilePath, 'utf8');
 
-      log(`Validating initial code: ${fileName}`);
+      log(`Validating initial code: ${originalFileName}`);
       await updateProgress(MatrixInstance, m, 30, "Validating Code");
       try {
         new Function(originalContent);
@@ -2336,23 +2308,29 @@ module.exports = [
       await fs.writeFile(encryptedPath, obfuscatedCode);
 
       await updateProgress(MatrixInstance, m, 80, "Finalizing Encryption");
-      log(`Validating obfuscation result: ${fileName}`);
+      log(`Validating obfuscation result: ${originalFileName}`);
       try {
         new Function(obfuscatedCode);
       } catch (postObfuscationError) {
         throw new Error(`Obfuscation result is not valid: ${postObfuscationError.message}`);
       }
 
-      log(`Sending encrypted file (Japan): ${fileName}`);
-      await MatrixInstance.sendFile(
-        m.chat,
-        encryptedPath,
-        `japan-encrypted-${fileName}`,
-        "✅ *Encrypted file (Hardened Japan) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊",
-        m,
-        false,
-        { mimetype: 'application/javascript' }
-      );
+      // Read encrypted file buffer
+const encryptedBuffer = await fs.readFile(encryptedPath);
+
+// Send as document with original filename and caption
+log(`Sending encrypted file: ${originalFileName}`);
+await MatrixInstance.sendMessage(
+  m.chat,
+  {
+    document: encryptedBuffer,
+    fileName: originalFileName,
+    mimetype: 'application/javascript',
+    caption: "✅ *Encrypted file (Hardened Japan) ready!*\nSUCCESSFULLY ENCRYPTED BY Matrix 🕊"
+  },
+  { quoted: m }
+);
+
 
       await updateProgress(MatrixInstance, m, 100, "Hardened Japan Obfuscation Completed");
       await MatrixInstance.sendMessage(m.chat, { react: { text: "✅", key: m.key } });

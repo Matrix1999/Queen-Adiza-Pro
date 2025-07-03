@@ -270,17 +270,38 @@ https://api.github.com/repos/Matrix1999/Queen-Adiza
 }, {
     command: ['time', 'date'],
     operate: async ({ m, reply }) => {
-      const now = moment().tz(global.timezones);
-      const timeInfo = `
-      *🔹 CURRENT TIME 🔹*
+        // Ensure global.timezones is defined and valid
+        const timezone = global.timezones || "UTC"; // Fallback to UTC if not defined
+
+        let now;
+        try {
+            now = moment().tz(timezone);
+            if (!now.isValid()) { // Check if the moment object is valid
+                throw new Error("Invalid timezone configured.");
+            }
+        } catch (error) {
+            console.error(`Error with timezone "${timezone}":`, error.message);
+            now = moment(); // Fallback to local time if timezone is invalid
+            reply(`⚠️ *Warning:* Configured timezone "${timezone}" is invalid. Displaying local time.\n\n` +
+                  `*🔹 CURRENT TIME 🔹*\n\n` +
+                  `🔸 *Day:* ${now.format('dddd')}\n` +
+                  `🔸 *Time:* ${now.format('HH:mm:ss')}\n` +
+                  `🔸 *Date:* ${now.format('LL')}\n` +
+                  `🔸 *Timezone:* ${now.tz() || "Local Time"}`); // Display actual timezone if available or "Local Time"
+            return; // Exit here as the error has been handled
+        }
+
+        const timeInfo = `
+        *🔹 CURRENT TIME 🔹*
 
 🔸 *Day:* ${now.format('dddd')}
 🔸 *Time:* ${now.format('HH:mm:ss')}
 🔸 *Date:* ${now.format('LL')}
-🔸 *Timezone:* ${global.timezones}
+🔸 *Timezone:* ${timezone}
 `;
 
-      reply(timeInfo.trim());
+        reply(timeInfo.trim());
     }
-  }
+}
+
 ];

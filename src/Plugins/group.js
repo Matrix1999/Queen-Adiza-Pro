@@ -1,62 +1,138 @@
-const fs = require('fs'); 
+const fs = require('fs');
+const path = require('path'); 
+const premiumSystem = require('../../lib/premiumSystem');
 const { sleep } = require('../../lib/myfunc');
 const { generateProfilePicture } = require('@whiskeysockets/baileys');
 
 
+
 module.exports = [
  {
-    command: ['add'],
-    operate: async (context) => {
-        const { m, mess, text, isCreator, reply,Matrix } = context;
-        if (!m.isGroup) return m.reply(mess.group);
-        if (!isCreator) return m.reply(mess.owner);
-        
-        let bws = m.quoted
-            ? m.quoted.sender
-            : text.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
-        await Matrix.groupParticipantsUpdate(m.chat, [bws], "add");
-        reply(mess.done);
+  command: ['add'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+    const text = context.text;
+
+    if (!m.isGroup) return reply(mess.group);
+
+    // Check if sender is creator or premium user
+    const senderIsPremium = premiumSystem.isPremium(m.sender);
+    if (!context.isCreator && !senderIsPremium) {
+      return reply("❌ You must be the bot owner or a premium user to use this command.");
     }
-}, {
+
+    let targetJid;
+
+    if (m.quoted && m.quoted.sender) {
+      targetJid = m.quoted.sender;
+    } else if (text) {
+      const number = text.replace(/[^0-9]/g, "");
+      if (!number) {
+        return reply("❌ Please provide a valid number to add.");
+      }
+      targetJid = number + "@s.whatsapp.net";
+    } else {
+      return reply("❌ Please mention or reply to the user you want to add.");
+    }
+
+    try {
+      await Matrix.groupParticipantsUpdate(m.chat, [targetJid], "add");
+      reply(mess.done);
+    } catch (error) {
+      reply(`❌ Failed to add user: ${error.message}`);
+    }
+  }
+}, 
+
+ {
     command: ['antibadword', 'antitoxic'],
     operate: async (context) => {
         const { m, db, from, isBotAdmins, isAdmins, isCreator, args, mess, command, reply } = context;
 
-        if (!m.isGroup) return reply(mess.group);
+        if (!m.isGroup) return reply(mess.group); 
+        const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+        // Ensure the database structure exists for this bot instance
+        db.data.users[botJid] = db.data.users[botJid] || {};
+        db.data.users[botJid].badwords = db.data.users[botJid].badwords || [];
+
+        const badwordsList = db.data.users[botJid].badwords; // Reference to the bot's badwords list
+
+        const action = args[0]?.toLowerCase(); 
+        const value = args.slice(1).join(' ').toLowerCase();       
+        if (action === "add") {
+            if (!isCreator) return reply(mess.creator);
+            if (!value) return reply("*Usage: .antibadword add <word>*"); 
+            
+            if (badwordsList.includes(value)) {
+                return reply(`*'${value}' is already in the bad words list for this bot.*`);
+            }
+            badwordsList.push(value); 
+            return reply(`*Successfully added '${value}' to the bad words list for this bot.*`);
+        }
+
+        if (action === "remove") {
+            if (!isCreator) return reply(mess.creator); 
+            if (!value) return reply("*Usage: .antibadword remove <word>*"); 
+
+            const index = badwordsList.indexOf(value);
+            if (index === -1) {
+                return reply(`*'${value}' is not found in the bad words list for this bot.*`);
+            }
+            badwordsList.splice(index, 1); 
+            return reply(`*Successfully removed '${value}' from the bad words list for this bot.*`);
+        }
+
+        if (action === "list") {
+            if (!isCreator) return reply(mess.creator);
+            if (badwordsList.length === 0) {
+                return reply("*The bad words list is currently empty for this bot.*");
+            }
+            // Display all words in the list
+            return reply(`*Bad Words for this bot:*\n\n${badwordsList.map(w => `- ${w}`).join('\n')}`);
+        }
+
+
         if (!isBotAdmins) return reply(mess.admin); 
         if (!isAdmins && !isCreator) return reply(mess.notadmin); 
-        if (args.length < 2) return reply("*Usage: .antibadword <delete/kick> <on/off>*");
 
-        const mode = args[0].toLowerCase();
-        const state = args[1].toLowerCase();
-
-        if (!["delete", "kick"].includes(mode)) {
-            return reply("*Invalid mode! Use either 'delete' or 'kick'.*");
-        }
-
-        if (!["on", "off"].includes(state)) {
-            return reply("*Invalid state! Use either 'on' or 'off'.*");
-        }
-
-        if (state === "on") {
-            if (mode === "delete") {
-                db.data.chats[from].badword = true;
-                db.data.chats[from].badwordkick = false;
-            } else if (mode === "kick") {
-                db.data.chats[from].badwordkick = true;
-                db.data.chats[from].badword = false;
+        if (action === "on" || action === "off") {
+            // Default mode is 'delete' if not specified (e.g., '.antibadword on')
+            const mode = value.toLowerCase() || "delete"; 
+            if (!["delete", "kick"].includes(mode)) {
+                return reply("*Invalid mode! Use 'delete' or 'kick' (default is 'delete').*");
             }
-            reply(`*Successfully enabled antibadword ${mode} mode!*`);
-        } else if (state === "off") {
-            if (mode === "delete") {
-                db.data.chats[from].badword = false;
-            } else if (mode === "kick") {
-                db.data.chats[from].badwordkick = false;
+
+            if (action === "on") {
+                if (mode === "delete") {
+                    db.data.chats[from].badword = true; // Enable delete mode for the chat
+                    db.data.chats[from].badwordkick = false; // Disable kick mode
+                } else if (mode === "kick") {
+                    db.data.chats[from].badwordkick = true; // Enable kick mode for the chat
+                    db.data.chats[from].badword = false; // Disable delete mode
+                }
+                reply(`*Successfully enabled antibadword ${mode} mode in this group!*`);
+            } else if (action === "off") {
+                if (mode === "delete") { // If turning off 'delete' mode for the chat
+                    db.data.chats[from].badword = false;
+                } else if (mode === "kick") { // If turning off 'kick' mode for the chat
+                    db.data.chats[from].badwordkick = false;
+                }
+                reply(`*Successfully disabled antibadword ${mode} mode in this group!*`);
             }
-            reply(`*Successfully disabled antibadword ${mode} mode!*`);
+        } else {
+            // Provide general usage instructions if no valid action is given
+            reply("*Usage:*\n" +
+                  "*.antibadword <on/off> [delete/kick]* - Toggle antibadword feature for this group (Group Admin/Creator).\n" +
+                  "*.antibadword add <word>* - Add a word to the bot's bad words list (Bot Creator only).\n" +
+                  "*.antibadword remove <word>* - Remove a word from the bot's bad words list (Bot Creator only).\n" +
+                  "*.antibadword list* - List all bad words for this bot (Bot Creator only).");
         }
     },
-}, {
+},
+ {
     command: ['antibot'],
     operate: async (context) => {
         const { m, db, from, isBotAdmins, isAdmins, isCreator, args, mess, command, reply } = context;
@@ -242,48 +318,9 @@ module.exports = [
     db.data.chats[from].antispam1 = choice === "on";
     return reply(`Antispam1 is now *${choice === "on" ? "enabled" : "disabled"}* in this group🚀.`);
   }
-}, {
-    command: ['antilink'],
-    operate: async (context) => {
-        const { m, db, from, isBotAdmins, isAdmins, isCreator, args, mess, command, reply } = context;
+}, 
 
-        if (!m.isGroup) return reply(mess.group); 
-        if (!isBotAdmins) return reply(mess.admin); 
-        if (!isAdmins && !isCreator) return reply(mess.notadmin); 
-        if (args.length < 2) return reply("*Usage: .antilink <delete/kick> <on/off>*");
-
-        const mode = args[0].toLowerCase();
-        const state = args[1].toLowerCase();
-
-        if (!["delete", "kick"].includes(mode)) {
-            return reply("*Invalid mode! Use either 'delete' or 'kick'.*");
-        }
-
-        if (!["on", "off"].includes(state)) {
-            return reply("*Invalid state! Use either 'on' or 'off'.*");
-        }
-
-        if (state === "on") {
-            if (mode === "delete") {
-          db.data.chats[from].antilinkkick = false;
-          db.data.chats[from].antilink = true;
-            } else if (mode === "kick") {
-         db.data.chats[from].antilink = false;
-         db.data.chats[from].antilinkkick = true;
-            }
-            reply(`*Successfully enabled antilink ${mode} mode!*`);
-        } else if (state === "off") {
-            if (mode === "delete") {
-          db.data.chats[from].antilinkkick = false;
-          db.data.chats[from].antilink = false;
-            } else if (mode === "kick") {
-         db.data.chats[from].antilink = false;
-         db.data.chats[from].antilinkkick = false;
-            }
-            reply(`*Successfully disabled antilink ${mode} mode!*`);
-        }
-    }
-}, {
+ {
     command: ['antilinkgc'],
     operate: async (context) => {
         const { m, db, from, isBotAdmins, isAdmins, isCreator, args, mess, command, reply } = context;
@@ -335,66 +372,56 @@ module.exports = [
     }
 }, {
   command: ["closetime"],
-  operate: async _0x66a44a => {
-    const {
-      m: _0x1732c3,
-      mess: _0x45c8b1,
-      args: _0x3780ac,
-      isAdmins: _0x4c6fda,
-      isCreator: _0x47f46f,
-      isBotAdmins: _0x3b9267,
-      Matrix: _0xe0220e,
-      reply: _0xb497b4
-    } = _0x66a44a;
-
-    if (!_0x1732c3.isGroup) {
-      return _0xb497b4(_0x45c8b1.group);
+  operate: async (context) => {
+    if (!context.m.isGroup) {
+      return context.reply(context.mess.group);
     }
 
-    if (!_0x4c6fda && !_0x47f46f) {
-      return _0xb497b4(_0x45c8b1.notadmin);
+    if (!context.isAdmins && !context.isCreator) {
+      return context.reply(context.mess.notadmin);
     }
 
-    if (!_0x3b9267) {
-      return _0xb497b4(_0x45c8b1.admin);
+    if (!context.isBotAdmins) {
+      return context.reply(context.mess.admin);
     }
 
-    if (_0x3780ac.length < 2) {
-      return _0xb497b4(
+    if (context.args.length < 2) {
+      return context.reply(
         "*Usage: .closetime <number> <unit>*\n*Example: .closetime 10 minutes*"
       );
     }
 
-    const _0x29fdab = _0x3780ac[0];
-    const _0x670dfe = _0x3780ac[1].toLowerCase();
-    let _0x5c67b7;
+    const amount = context.args[0];
+    const unit = context.args[1].toLowerCase();
+    let delay;
 
-    switch (_0x670dfe) {
+    switch (unit) {
       case "seconds":
-        _0x5c67b7 = _0x29fdab * 1000;
+        delay = amount * 1000;
         break;
       case "minutes":
-        _0x5c67b7 = _0x29fdab * 60000;
+        delay = amount * 60000;
         break;
       case "hours":
-        _0x5c67b7 = _0x29fdab * 3600000;
+        delay = amount * 3600000;
         break;
       case "days":
-        _0x5c67b7 = _0x29fdab * 86400000;
+        delay = amount * 86400000;
         break;
       default:
-        return _0xb497b4(
+        return context.reply(
           "*Select unit:*\nseconds\nminutes\nhours\ndays\n\n*Example:*\n10 seconds"
         );
     }
 
-    _0xb497b4("*Closing group after " + _0x29fdab + " " + _0x670dfe + "*");
+    context.reply(`*Closing group after ${amount} ${unit}*`);
     setTimeout(() => {
-      _0xe0220e.groupSettingUpdate(_0x1732c3.chat, "announcement");
-      _0xb497b4("Group closed by admin. Only admins can send messages.");
-    }, _0x5c67b7);
+      context.Matrix.groupSettingUpdate(context.m.chat, "announcement");
+      context.reply("Group closed by admin. Only admins can send messages.");
+    }, delay);
   }
-}, {
+}, 
+{
     command: ['delppgroup'],
     operate: async (context) => {
         const { m, mess, isAdmins, isCreator, isBotAdmins, Matrix, reply, from } = context;
@@ -406,42 +433,95 @@ module.exports = [
         reply("Group profile picture has been successfully removed.");
     }
 }, {
-    command: ['demote'],
-    operate: async (context) => {
-        const { m, mess, text, isAdmins, isGroupOwner, isCreator, isBotAdmins, Matrix } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.admin);
-        if (!isBotAdmins) return reply(mess.admin);
+  command: ['demote'],
+  desc: "Demote a member (or multiple) from admin. Usage: .demote @user or .demote 123456789",
+  operate: async (context) => {
+    const { m, mess, text, isAdmins, isGroupOwner, isCreator, isBotAdmins, Matrix, reply } = context;
 
-        let bwstq = m.mentionedJid[0]
-            ? m.mentionedJid[0]
-            : m.quoted
-            ? m.quoted.sender
-            : text.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
-        await Matrix.groupParticipantsUpdate(m.chat, [bwstq], "demote");
-        reply(mess.done);
-    }
-}, {
-    command: ['editsettings', 'editinfo'],
-    operate: async (context) => {
-        const { m, mess, args, isAdmins, isGroupOwner, isCreator, isBotAdmins, Matrix, prefix, command } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.admin);
-        if (!isBotAdmins) return reply(mess.admin);
+    if (!m.isGroup) return reply(mess.group);
+    if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.admin);
+    if (!isBotAdmins) return reply(mess.admin);
 
-        if (args[0] === "on") {
-            await Matrix.groupSettingUpdate(m.chat, "unlocked").then(
-                (res) => reply(`*Successful, members can edit group info*`)
-            );
-        } else if (args[0] === "off") {
-            await Matrix.groupSettingUpdate(m.chat, "locked").then((res) =>
-                reply(`*Successful, members cannot edit group info*`)
-            );
-        } else {
-            reply(`Example ${prefix + command} on/off`);
-        }
+    let targets = [];
+
+    if (m.mentionedJid && m.mentionedJid.length) {
+      targets = m.mentionedJid;
+    } else if (m.quoted && m.quoted.sender) {
+      targets = [m.quoted.sender];
+    } else if (text) {
+      let numbers = text.match(/\d{5,}/g);
+      if (numbers) {
+        targets = numbers.map(num => num + "@s.whatsapp.net");
+      }
     }
-}, {
+
+    if (!targets.length) {
+      return reply("❌ Please mention, reply to, or provide the number(s) of the user(s) you want to demote.\nExample: .demote @user or .demote 123456789");
+    }
+
+    // Remove group owner from targets if present (usually owner can't be demoted)
+    const groupMetadata = await Matrix.groupMetadata(m.chat).catch(() => null);
+    if (groupMetadata && groupMetadata.owner) {
+      targets = targets.filter(jid => jid !== groupMetadata.owner);
+    }
+
+    let demoted = [];
+    for (let jid of targets) {
+      try {
+        await Matrix.groupParticipantsUpdate(m.chat, [jid], "demote");
+        demoted.push(jid);
+      } catch (e) {
+        // ignore failures for now
+      }
+    }
+
+    if (!demoted.length) {
+      return reply("❌ No users were demoted.");
+    }
+
+    // Send simple confirmation message with mentions but no bullets
+    reply("✅ Demotion done:", { mentions: demoted });
+  }
+}, 
+{
+  command: ['editsettings', 'editinfo'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+    const prefix = context.prefix;
+    const command = context.command;
+    const args = context.args;
+
+    // Permission checks similar to promote command
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+    if (!context.isBotAdmins) return reply(mess.admin);
+
+    if (!args || args.length === 0) {
+      return reply(`❌ Usage: ${prefix + command} on/off`);
+    }
+
+    const option = args[0].toLowerCase();
+
+    try {
+      if (option === "on") {
+        await Matrix.groupSettingUpdate(m.chat, "unlocked");
+        reply(`✅ Successful, members can now edit group info.`);
+      } else if (option === "off") {
+        await Matrix.groupSettingUpdate(m.chat, "locked");
+        reply(`✅ Successful, members cannot edit group info.`);
+      } else {
+        reply(`❌ Invalid option.\nExample usage: ${prefix + command} on/off`);
+      }
+    } catch (error) {
+      console.error('Error updating group info setting:', error);
+      reply('❌ Failed to update group info settings. Please try again later.');
+    }
+  }
+}, 
+ {
   command: ['grouplink'],
   operate: async ({ Matrix, m, reply, isAdmins, isGroupOwner, isCreator, mess, isBotAdmins, groupMetadata }) => {
     if (!m.isGroup) return reply(mess.group);
@@ -480,31 +560,35 @@ module.exports = [
         );
     }
 }, {
-    command: ['invite'],
-    operate: async (context) => {
-        const { m, mess, text, prefix, Matrix, isBotAdmins } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isBotAdmins) return reply(mess.admin);
-        if (!text)
-            return reply(
-                `*Enter the number you want to invite to this group*\n\nExample :\n${prefix + command} 254796180105`
-            );
-        if (text.includes("+"))
-            return reply(`*Enter the number together without* *+*`);
-        if (isNaN(text))
-            return reply(
-                `*Enter only the numbers with your country code without spaces*`
-            );
+  command: ['invite'],
+  operate: async (context) => {
+    const { m, mess, text, prefix, Matrix, isBotAdmins, reply } = context;
+    if (!m.isGroup) return reply(mess.group);
+    if (!isBotAdmins) return reply(mess.admin);
+    if (!text)
+      return reply(
+        `*Enter the number you want to invite to this group*\n\nExample :\n${prefix + context.command} 254796180105`
+      );
+    if (text.includes("+"))
+      return reply(`*Enter the number together without* *+*`);
+    if (isNaN(text))
+      return reply(
+        `*Enter only the numbers with your country code without spaces*`
+      );
 
-        let group = m.chat;
-        let link = "https://chat.whatsapp.com/" + (await Matrix.groupInviteCode(group));
-        await Matrix.sendMessage(text + "@s.whatsapp.net", {
-            text: `*GROUP INVITATION*\n\🚀Matrix invites you to join his group🪀: \n\n${link}`,
-            mentions: [m.sender],
-        });
-        reply(`*Successfully sent invite link*`);
-    }
-}, {
+    let group = m.chat;
+    let link = "https://chat.whatsapp.com/" + (await Matrix.groupInviteCode(group));
+    await Matrix.sendMessage(text + "@s.whatsapp.net", {
+      text: `*GROUP INVITATION*\n\🚀Matrix invites you to join his group🪀: \n\n${link}`,
+      mentions: [m.sender],
+    });
+    reply(`*Successfully sent invite link*`);
+
+    // New line: Send confirmation message in the group chat
+    await Matrix.sendMessage(group, { text: "Invitation sent ✅" });
+  }
+}, 
+{
     command: ['kick', 'remove'],
     operate: async (context) => {
         const { m, mess, text, isAdmins, isGroupOwner, isCreator, isBotAdmins, Matrix } = context;
@@ -575,35 +659,84 @@ module.exports = [
 }, {
   command: ['listonline', 'onlinemembers'],
   operate: async (context) => {
-    const { m, mess, args, store, botNumber, Matrix, reply } = context;
-    if (!m.isGroup) return reply(mess.group);
-    
-    let id = args && /\d+\-\d+@g.us/.test(args[0]) ? args[0] : m.chat;
-    let presences = store.presences[id];
-    
-    if (!presences) {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+
+    console.log('listonline command invoked by:', m.sender);
+    if (!m.isGroup) {
+      console.log('Not a group chat.');
+      return reply(mess.group);
+    }
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) {
+      console.log('User lacks admin/owner/creator permissions.');
+      return reply(mess.admin);
+    }
+
+    const args = context.args || [];
+    let groupId = (args[0] && /\d+\-\d+@g.us/.test(args[0])) ? args[0] : m.chat;
+    console.log('Checking presence for group:', groupId);
+
+    if (!context.store) {
+      console.log('context.store is undefined.');
+      return reply('❌ Presence data not available. The bot may not be tracking online status.');
+    }
+    if (!context.store.presences) {
+      console.log('context.store.presences is undefined.');
+      return reply('❌ Presence data not available. The bot may not be tracking online status.');
+    }
+
+    let presences = context.store.presences[groupId];
+    console.log('Presence data for group:', presences);
+
+    if (!presences || Object.keys(presences).length === 0) {
+      console.log('No online members detected in this group.');
       return reply('*No online members detected in this group.*');
     }
 
-    let online = [...Object.keys(presences), botNumber];
-    let liston = 1;
-    Matrix.sendText(m.chat, '*ONLINE MEMBERS IN THIS GROUP*\n\n' + online.map(v => `${liston++} . @` + v.replace(/@.+/, '')).join`\n`, m, { mentions: online });
-  }
-}, {
-    command: ['mediatag'],
-    operate: async (context) => {
-        const { m, isAdmins, mess, participants, Matrix, isBotAdmins } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isBotAdmins) return reply(mess.admin);
-        if (!isAdmins) return reply(mess.admin);
-        if (!m.quoted) return reply(`Reply to any media with caption ${prefix + command}`);
+    let onlineMembers = [...Object.keys(presences)];
+    if (context.botNumber) onlineMembers.push(context.botNumber);
+    console.log(`Online members count: ${onlineMembers.length}`);
 
-        Matrix.sendMessage(m.chat, {
-          forward: m.quoted.fakeObj,
-          mentions: participants.map((a) => a.id),
-        });
+    let counter = 1;
+    let message = '*ONLINE MEMBERS IN THIS GROUP*\n\n' +
+      onlineMembers.map(jid => `${counter++}. @${jid.split('@')[0]}`).join('\n');
+
+    console.log('Sending online members list...');
+    await Matrix.sendText(m.chat, message, m, { mentions: onlineMembers });
+  }
+}, 
+{
+  command: ['mediatag'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+
+    // Permission checks similar to promote command
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isBotAdmins) return reply(mess.admin);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+
+    if (!m.quoted) {
+      return reply(`Reply to any media with caption ${context.prefix + context.command}`);
     }
-}, {
+
+    try {
+      await Matrix.sendMessage(m.chat, {
+        forward: m.quoted.fakeObj,
+        mentions: context.participants.map(p => p.id),
+      });
+    } catch (error) {
+      console.error('mediatag error:', error);
+      reply('Failed to forward media. Please try again.');
+    }
+  }
+}, 
+
+{
     command: ['open'],
     operate: async (context) => {
         const { m, mess, isAdmins, isCreator, isBotAdmins, Matrix } = context;
@@ -615,84 +748,169 @@ module.exports = [
         reply("Group opened by admin. Members can now send messages.");
     }
 }, {
-    command: ['opentime'],
-    operate: async (context) => {
-        const { m, mess, args, isAdmins, isCreator, isBotAdmins, Matrix } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isAdmins && !isCreator) return reply(mess.notadmin);
-        if (!isBotAdmins) return reply(mess.admin);
-
-        const duration = args[0];
-        const unit = args[1].toLowerCase();
-
-        let timer;
-        switch (unit) {
-            case "seconds":
-                timer = duration * 1000;
-                break;
-            case "minutes":
-                timer = duration * 60000;
-                break;
-            case "hours":
-                timer = duration * 3600000;
-                break;
-            case "days":
-                timer = duration * 86400000;
-                break;
-            default:
-                return reply("*Select unit:*\nseconds\nminutes\nhours\ndays\n\n*Example:*\n10 seconds");
-        }
-
-        reply(`*Opening group after ${duration} ${unit}*`);
-        setTimeout(() => {
-            Matrix.groupSettingUpdate(m.chat, "not_announcement");
-            reply("Group opened by admin. Members can now send messages.");
-        }, timer);
+  command: ['opentime'],
+  operate: async (context) => {
+    if (!context.m.isGroup) {
+      return context.reply(context.mess.group);
     }
-}, {
-    command: ['poll'],
-    operate: async (context) => {
-        const { m, mess, text, isCreator, prefix, Matrix, isGroup } = context;
-        if (!isCreator) return reply(mess.owner);
-        if (!m.isGroup) return reply(mess.group);
-        let [poll, opt] = text.split("|");
-        if (text.split("|") < 2)
-            return await reply(
-                `Enter a question and at least 2 options\nExample: ${prefix}poll Who is best player?|Messi,Ronaldo,None...`
-            );
-        let options = [];
-        for (let i of opt.split(",")) {
-            options.push(i);
-        }
-        
-        await Matrix.sendMessage(m.chat, {
-            poll: {
-                name: poll,
-                values: options,
-            },
-        });
+    if (!context.isAdmins && !context.isCreator) {
+      return context.reply(context.mess.notadmin);
     }
-}, {
-    command: ['promote'],
-    operate: async (context) => {
-        const { m, mess, text, isAdmins, isGroupOwner, isCreator, isBotAdmins, quoted, Matrix } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.admin);
-        if (!isBotAdmins) return reply(mess.admin);
-        
-        let bwst = m.mentionedJid[0]
-            ? m.mentionedJid[0]
-            : m.quoted
-            ? m.quoted.sender
-            : text.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
-        await Matrix.groupParticipantsUpdate(
-            m.chat,
-            [bwst],
-            "promote"
+    if (!context.isBotAdmins) {
+      return context.reply(context.mess.admin);
+    }
+
+    const duration = context.args[0];
+    const unit = context.args[1]?.toLowerCase();
+
+    if (!duration || !unit) {
+      return context.reply(
+        "*Usage: .opentime <number> <unit>*\n*Example: .opentime 10 minutes*"
+      );
+    }
+
+    let timer;
+    switch (unit) {
+      case "seconds":
+        timer = duration * 1000;
+        break;
+      case "minutes":
+        timer = duration * 60000;
+        break;
+      case "hours":
+        timer = duration * 3600000;
+        break;
+      case "days":
+        timer = duration * 86400000;
+        break;
+      default:
+        return context.reply(
+          "*Select unit:*\nseconds\nminutes\nhours\ndays\n\n*Example:*\n10 seconds"
         );
-        reply(mess.done);
     }
-}, {
+
+    context.reply(`*Opening group after ${duration} ${unit}*`);
+    setTimeout(() => {
+      context.Matrix.groupSettingUpdate(context.m.chat, "not_announcement");
+      context.reply("Group opened by admin. Members can now send messages.");
+    }, timer);
+  }
+}, 
+{
+  command: ['poll'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+    const text = context.text;
+    const prefix = context.prefix;
+    const command = context.command;
+
+    // Permission checks consistent with promote command
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+
+    if (!text || !text.includes('|')) {
+      return reply(
+        `❌ Please provide a question and options separated by '|'.\n` +
+        `Example:\n${prefix}poll Who is the best player?|Messi,Ronaldo,None`
+      );
+    }
+
+    const parts = text.split('|');
+    if (parts.length < 2) { // Ensure there's at least a question and options part
+      return reply(
+        `❌ Please provide a question and at least one set of options separated by '|'.\n` +
+        `Example:\n${prefix}poll Who is the best player?|Messi,Ronaldo,None`
+      );
+    }
+
+    const question = parts[0].trim();
+    const rawOptions = parts[1].split(',');
+
+    // Filter out empty or whitespace-only options and ensure at least two options
+    const options = rawOptions.map(opt => opt.trim()).filter(opt => opt.length > 0);
+
+    if (options.length < 2) {
+      return reply(
+        `❌ Please provide at least two valid options separated by commas after the '|'.\n` +
+        `Example:\n${prefix}poll Who is the best player?|Messi,Ronaldo,None`
+      );
+    }
+
+    // WhatsApp poll API limit: 12 options
+    if (options.length > 12) {
+        return reply('❌ A poll can have a maximum of 12 options.');
+    }
+
+    try {
+      await Matrix.sendMessage(m.chat, {
+        poll: {
+          name: question,
+          values: options,
+        },
+      });
+    } catch (error) {
+      console.error('Poll command error:', error);
+      reply('❌ Failed to create poll. Please try again later.');
+    }
+  }
+}, 
+
+ {
+  command: ['promote'],
+  desc: "Promote a member (or multiple) to admin. Usage: .promote @user or .promote 123456789",
+  operate: async (context) => {
+    const { m, mess, text, isAdmins, isGroupOwner, isCreator, isBotAdmins, Matrix, reply } = context;
+
+    if (!m.isGroup) return reply(mess.group);
+    if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.admin);
+    if (!isBotAdmins) return reply(mess.admin);
+
+    let targets = [];
+
+    if (m.mentionedJid && m.mentionedJid.length) {
+      targets = m.mentionedJid;
+    } else if (m.quoted && m.quoted.sender) {
+      targets = [m.quoted.sender];
+    } else if (text) {
+      let numbers = text.match(/\d{5,}/g);
+      if (numbers) {
+        targets = numbers.map(num => num + "@s.whatsapp.net");
+      }
+    }
+
+    if (!targets.length) {
+      return reply("❌ Please mention, reply to, or provide the number(s) of the user(s) you want to promote.\nExample: .promote @user or .promote 123456789");
+    }
+
+    // Remove group owner from targets if present
+    const groupMetadata = await Matrix.groupMetadata(m.chat).catch(() => null);
+    if (groupMetadata && groupMetadata.owner) {
+      targets = targets.filter(jid => jid !== groupMetadata.owner);
+    }
+
+    let promoted = [];
+    for (let jid of targets) {
+      try {
+        await Matrix.groupParticipantsUpdate(m.chat, [jid], "promote");
+        promoted.push(jid);
+      } catch (e) {
+        // ignore failures for now
+      }
+    }
+
+    if (!promoted.length) {
+      return reply("❌ No users were promoted.");
+    }
+
+    // Send simple confirmation message with mentions but no bullets
+    reply("✅ Promotion done:", { mentions: promoted });
+  }
+}, 
+
+ {
     command: ['resetlink'],
     operate: async (context) => {
         const { m, isAdmins, isGroupOwner, isCreator, mess, Matrix, isBotAdmins } = context;
@@ -705,18 +923,33 @@ module.exports = [
         });
     }
 }, {
-    command: ['setdesc'],
-    operate: async (context) => {
-        const { m, mess, text, isAdmins, isGroupOwner, isCreator, isBotAdmins, Matrix } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.notadmin);
-        if (!isBotAdmins) return reply(mess.admin);
-        if (!text) return reply("*Please enter a text*");
-        
-        await Matrix.groupUpdateDescription(m.chat, text);
-        reply(mess.done);
+  command: ['setdesc'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+    const text = context.text;
+
+    // Permission checks consistent with promote command
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.notadmin);
+    if (!context.isBotAdmins) return reply(mess.admin);
+
+    if (!text || text.trim().length === 0) {
+      return reply("*Please enter a description text.*");
     }
-}, {
+
+    try {
+      await Matrix.groupUpdateDescription(m.chat, text.trim());
+      reply(mess.done);
+    } catch (error) {
+      console.error('Error updating group description:', error);
+      reply('❌ Failed to update group description. Please try again later.');
+    }
+  }
+}, 
+{
   command: ["joinlist"],
   tags: ["group"],
   help: ["joinlist"],
@@ -809,18 +1042,33 @@ module.exports = [
     }
   }
 }, {
-    command: ['setgroupname', 'setgcname'],
-    operate: async (context) => {
-        const { m, mess, text, isAdmins, isGroupOwner, isCreator, isBotAdmins, Matrix } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.admin);
-        if (!isBotAdmins) return reply(mess.admin);
-        if (!text) return reply("*Desired groupname?*");
+  command: ['setgroupname', 'setgcname'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+    const text = context.text;
 
-        await Matrix.groupUpdateSubject(m.chat, text);
-        reply(mess.done);
+    // Permission checks similar to promote command
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+    if (!context.isBotAdmins) return reply(mess.admin);
+
+    if (!text || text.trim().length === 0) {
+      return reply("*Please provide the desired group name.*");
     }
-}, {
+
+    try {
+      await Matrix.groupUpdateSubject(m.chat, text.trim());
+      reply(mess.done);
+    } catch (error) {
+      console.error('Error setting group name:', error);
+      reply('❌ Failed to update group name. Please try again later.');
+    }
+  }
+}, 
+{
   command: ['setppgroup'],
   operate: async ({ m, reply, mess, isAdmins, isCreator, isBotAdmins, Matrix, quoted, mime, prefix, command, args }) => {
     if (!m.isGroup) return reply(mess.group);
@@ -876,94 +1124,206 @@ module.exports = [
       { quoted: m }
     );
   }
-}, {
-    command: ['tagall'],
-    operate: async (context) => {
-        const { m, isAdmins, isGroupOwner, isCreator, mess, q, participants, Matrix, isBotAdmins } = context;
-        if (!m.isGroup) return reply(mess.group);
-        if (!isAdmins && !isGroupOwner && !isCreator) return reply(mess.admin);
-        if (!isBotAdmins) return reply(mess.admin);
+},
+{
+  command: ['tagall'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
 
-        let me = m.sender;
-        let teks = `*TAGGED BY:*  @${
-          me.split("@")[0]
-        }\n\n*MESSAGE:* ${q ? q : "No message"}\n\n`;
-        for (let mem of participants) {
-          teks += `@${mem.id.split("@")[0]}\n`;
-        }
-        Matrix.sendMessage(
-          m.chat,
-          {
-            text: teks,
-            mentions: participants.map((a) => a.id),
-          },
-          {
-            quoted: m,
-          }
-        );
-    }
-}, {
-  command: ['totalmembers'],
-  operate: async ({ Matrix, m, reply, mess, participants, isGroupAdmins, isCreator, sleep, groupMetadata }) => {
+    // Permission checks like promote command
     if (!m.isGroup) return reply(mess.group);
-    if (!(isGroupAdmins || isCreator)) return reply(mess.admin);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+    if (!context.isBotAdmins && !context.isCreator) return reply(mess.botAdmin);
+
+    let messageText = `*👥 You have Tag All*\n\n🗞️ *Message : ${context.q ? context.q : 'blank'}*\n\n`;
+
+    for (const member of context.participants) {
+      messageText += `• @${member.id.split('@')[0]}\n`;
+    }
 
     await Matrix.sendMessage(
       m.chat,
       {
-        text: `*GROUP*: ${groupMetadata.subject}\n*MEMBERS*: ${participants.length}`,
+        text: messageText,
+        mentions: context.participants.map(p => p.id),
       },
-      { quoted: m, ephemeralExpiration: 86400 }
-    );
-  }
-}, {
-    command: ['userid', 'userjid'],
-    operate: async (context) => {
-        const { m, mess, isCreator, Matrix } = context;
-        if (!isCreator) return reply(mess.owner);
-        if (!m.isGroup) return reply(mess.group);
-
-        const groupMetadata = m.isGroup
-            ? await Matrix.groupMetadata(m.chat).catch((e) => {})
-            : "";
-        const participants = m.isGroup
-            ? await groupMetadata.participants
-            : "";
-        let textt = `Here is jid address of all users of\n *${groupMetadata.subject}*\n\n`;
-        for (let mem of participants) {
-            textt += `□ ${mem.id}\n`;
-        }
-        reply(textt);
-    }
-},
- {
-  command: ['vcf'],
-  operate: async ({ Matrix, m, reply, mess, participants, isGroupAdmins, isCreator, groupMetadata }) => {
-    if (!m.isGroup) return reply(mess.group);
-    if (!isGroupAdmins) return reply(mess.admin);
-
-    let cmiggc = await Matrix.groupMetadata(m.chat);
-    let vcard = "";
-    let noPort = 0;
-    for (let a of cmiggc.participants) {
-      vcard += `BEGIN:VCARD\nVERSION:3.0\nFN:[${noPort++}] +${a.id.split("@")[0]}\nTEL;type=CELL;type=VOICE;waid=${a.id.split("@")[0]}:+${a.id.split("@")[0]}\nEND:VCARD\n`;
-    }
-    let nmfilect = "./contacts.vcf";
-    reply(`\nPlease wait, saving ${cmiggc.participants.length} contacts`);
-
-    fs.writeFileSync(nmfilect, vcard.trim());
-    await sleep(2000);
-    Matrix.sendMessage(
-      m.chat,
       {
-        document: fs.readFileSync(nmfilect),
-        mimetype: "text/vcard",
-        fileName: "Contact.vcf",
-        caption: `Successful\n\nGroup: *${cmiggc.subject}*\nContacts: *${cmiggc.participants.length}*`,
-      },
-      { ephemeralExpiration: 86400, quoted: m }
+        quoted: m,
+      }
     );
-    fs.unlinkSync(nmfilect);
   }
-},  
+}, 
+
+{
+  command: ['totalmembers'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+
+    // Permission checks similar to promote command
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+
+    try {
+      const groupMetadata = await Matrix.groupMetadata(m.chat);
+      const totalMembers = groupMetadata.participants.length;
+      const groupName = groupMetadata.subject || 'Unknown Group';
+
+      const adminCount = groupMetadata.participants.filter(p => p.admin).length;
+
+      const message = 
+        `📊 *Group Info*\n\n` +
+        `*Name:* ${groupName}\n` +
+        `*Total Members:* ${totalMembers}\n` +
+        `*Admins:* ${adminCount}\n` +
+        `*Group ID:* ${groupMetadata.id}`;
+
+      await Matrix.sendMessage(m.chat, { text: message }, { quoted: m });
+    } catch (error) {
+      console.error('Error fetching group info:', error);
+      reply('❌ Failed to retrieve group information. Please try again later.');
+    }
+  }
+}, 
+{
+  command: ['userid', 'userjid'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+
+    // Permission check similar to promote command
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+
+    try {
+      const groupMetadata = await Matrix.groupMetadata(m.chat);
+      if (!groupMetadata || !groupMetadata.participants) {
+        return reply('❌ Failed to fetch group participants.');
+      }
+
+      let message = `Here is the JID address of all users in\n*${groupMetadata.subject}*\n\n`;
+      for (const participant of groupMetadata.participants) {
+        message += `□ ${participant.id}\n`;
+      }
+
+      reply(message);
+    } catch (error) {
+      console.error('Error fetching user JIDs:', error);
+      reply('❌ An error occurred while fetching the user list. Please try again later.');
+    }
+  }
+},    {
+  command: ['groupsettings', 'gsettings'],
+  operate: async ({
+    m,             // Message object (first instance)
+    reply,
+    db,
+    isCreator,
+    isAdmins,
+    isGroupOwner
+    // The duplicate 'm' has been removed from here
+  }) => {
+    if (!m.isGroup) {
+      return reply("ℹ️ This command displays settings specific to group chats. Please use it inside a group.");
+    }
+
+    // Access control for group usage: Creator OR Group Admin OR Group Owner
+    if (!isCreator && !isAdmins && !isGroupOwner) {
+      // Assuming 'mess' is available globally or passed in context if needed here
+      // Re-added mess to destructuring for consistency if it's used
+      // Let's assume 'mess' is also passed in the context for this command.
+      return reply("❌ You must be the bot creator, a group admin, or the group owner to use this command here.");
+    }
+
+    const groupChatSettings = db.data.chats[m.chat] || {};
+
+    let displayMessage = `⚙️ *Settings for This Group Chat (${(m.chat || '').split('@')[0]}):*\n\n`;
+    let hasSettings = false;
+
+    for (const key in groupChatSettings) {
+      if (groupChatSettings.hasOwnProperty(key)) {
+        hasSettings = true;
+        const value = groupChatSettings[key];
+        const formattedValue = typeof value === 'boolean' ? (value ? 'ON' : 'OFF') : value;
+        displayMessage += `❄️ *${key}*: ${formattedValue}\n`;
+      }
+    }
+
+    if (!hasSettings) {
+        displayMessage += "No specific settings found for this group.";
+    }
+
+    await reply(displayMessage);
+  }
+ },
+
+{
+  command: ['vcf'],
+  operate: async (context) => {
+    const m = context.m;
+    const mess = context.mess;
+    const reply = context.reply;
+    const Matrix = context.Matrix;
+
+    // Permission checks matching promote command style
+    if (!m.isGroup) return reply(mess.group);
+    if (!context.isAdmins && !context.isGroupOwner && !context.isCreator) return reply(mess.admin);
+
+    try {
+      // Get group metadata
+      const groupMeta = await Matrix.groupMetadata(m.chat);
+
+      // Build vCard string for all participants
+      let vcardData = '';
+      let index = 0;
+      for (const participant of groupMeta.participants) {
+        const number = participant.id.split('@')[0];
+        vcardData += 
+          `BEGIN:VCARD\n` +
+          `VERSION:3.0\n` +
+          `FN:[${index++}] +${number}\n` +
+          `TEL;type=CELL;type=VOICE;waid=${number}:+${number}\n` +
+          `END:VCARD\n`;
+      }
+
+      const filePath = './contacts.vcf';
+
+      // Inform user about saving process
+      await reply(`\nPlease wait, saving ${groupMeta.participants.length} contacts...`);
+
+      // Write vCard data to file
+      fs.writeFileSync(filePath, vcardData.trim());
+
+      // Wait a bit to ensure file is ready (optional)
+      await sleep(2000);
+
+      // Send vCard file to group
+      await Matrix.sendMessage(
+        m.chat,
+        {
+          document: fs.readFileSync(filePath),
+          mimetype: 'text/vcard',
+          fileName: 'Contacts.vcf',
+          caption: `✅ Successful\n\nGroup: *${groupMeta.subject}*\nContacts: *${groupMeta.participants.length}*`,
+        },
+        { ephemeralExpiration: 86400, quoted: m }
+      );
+
+      // Clean up temporary file
+      fs.unlinkSync(filePath);
+
+    } catch (error) {
+      console.error('Error in vcf command:', error);
+      reply('❌ Failed to generate contacts. Please try again later.');
+    }
+  }
+}, 
+
 ];

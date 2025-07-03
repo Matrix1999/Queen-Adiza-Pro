@@ -55,22 +55,7 @@ module.exports = [
             text
         }) => {
             const userId = m.sender;
-            const serviceName = 'netflix';
-
-            premiumManager.registerService(serviceName);
-
-            // Owner bypass logic
-            if (userId === OWNER_NUMBER) {
-                console.log('[DEBUG] Owner detected, bypassing premium check.');
-            } else if (!await premiumManager.isPremium(userId, serviceName)) {
-                await MatrixInstance.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
-                return reply(
-                    `🚫 *Premium Required!*\n\n` +
-                    `This feature is for premium users only.\n` +
-                    `To use *${serviceName.toUpperCase()}*, you need an active premium subscription or All-Access Premium.\n\n` +
-                    `Type *.buy_premium* to learn more.`
-                );
-            }
+                        
 
             await MatrixInstance.sendMessage(m.chat, { react: { text: "🍿", key: m.key } });
             await showTyping(MatrixInstance, m.chat);
@@ -104,9 +89,8 @@ module.exports = [
             await sendMessageWithImage({ Matrix: MatrixInstance, m, imageUrl: randomImageUrl, caption: netflixDetails });
             console.log('Netflix photo and details sent with copyable logins and new emojis.');
         }
-    },
-    {
-        command: ['canvapro', 'canva'],
+ },  {
+            command: ['canvapro', 'canva'],
         operate: async ({
             Matrix: MatrixInstance,
             m,
@@ -114,22 +98,6 @@ module.exports = [
             text
         }) => {
             const userId = m.sender;
-            const serviceName = 'canvapro';
-
-            premiumManager.registerService(serviceName);
-
-            // Owner bypass logic
-            if (userId === OWNER_NUMBER) {
-                console.log('[DEBUG] Owner detected, bypassing premium check.');
-            } else if (!await premiumManager.isPremium(userId, serviceName)) {
-                await MatrixInstance.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
-                return reply(
-                    `🚫 *Premium Required!*\n\n` +
-                    `This feature is for premium users only.\n` +
-                    `To use *${serviceName.toUpperCase()}*, you need an active premium subscription or All-Access Premium.\n\n` +
-                    `Type *.buy_premium* to learn more.`
-                );
-            }
 
             await MatrixInstance.sendMessage(m.chat, { react: { text: "🎨", key: m.key } });
             await showTyping(MatrixInstance, m.chat);
@@ -142,7 +110,7 @@ module.exports = [
             ];
             const randomCanvaImageUrl = canvaImageUrls[Math.floor(Math.random() * canvaImageUrls.length)];
             const canvaDetails = `
-🎨✨𝗖𝗮𝗻𝘃𝗮 𝗣𝗿𝗼 𝗔𝗰𝗰𝗼𝘂𝗻𝘁✨🎨
+🎨✨𝗖𝗮𝗻𝘃𝗮 𝗣𝗿𝗼 𝗔𝗰𝗰𝗼𝘂𝗻𝘁✨
 
 🎉 We’re excited to inform you that your Canva Pro account has been successfully activated! You now have full access to premium features to elevate your design experience!
 
@@ -160,7 +128,7 @@ Do not invite anyone as a team member. Any breach of this policy may lead to imm
             await sendMessageWithImage({ Matrix: MatrixInstance, m, imageUrl: randomCanvaImageUrl, caption: canvaDetails });
             console.log('Canva Pro photo and details sent.');
         }
-    },
+ },
     {
         command: ['primevideo', 'prime'],
         operate: async ({
@@ -170,23 +138,7 @@ Do not invite anyone as a team member. Any breach of this policy may lead to imm
             text
         }) => {
             const userId = m.sender;
-            const serviceName = 'primevideo';
-
-            premiumManager.registerService(serviceName);
-
-            // Owner bypass logic
-            if (userId === OWNER_NUMBER) {
-                console.log('[DEBUG] Owner detected, bypassing premium check.');
-            } else if (!await premiumManager.isPremium(userId, serviceName)) {
-                await MatrixInstance.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
-                return reply(
-                    `🚫 *Premium Required!*\n\n` +
-                    `This feature is for premium users only.\n` +
-                    `To use *${serviceName.toUpperCase()}*, you need an active premium subscription or All-Access Premium.\n\n` +
-                    `Type *.buy_premium* to learn more.`
-                );
-            }
-
+            
             await MatrixInstance.sendMessage(m.chat, { react: { text: "🎬", key: m.key } });
             await showTyping(MatrixInstance, m.chat);
             console.log('Prime Video command received...');
@@ -218,12 +170,10 @@ Do not invite anyone as a team member. Any breach of this policy may lead to imm
 🌹💎🌹💎🌹💎🌹💎🌹
 `;
             await sendMessageWithImage({ Matrix: MatrixInstance, m, imageUrl: randomPrimeVideoImageUrl, caption: combinedPrimeVideoMessage });
-         //   await MatrixInstance.sendMessage(m.chat, { text: `Click here to download the Prime Video App:\n${downloadLink}` }, { quoted: m });
-       //     console.log('Prime Video photo, combined details/description, and download link sent.');
-        }
-    },
-    {
-        command: ['matrixbug'],
+
+  }
+}, {
+        command: ['startimes'],
         operate: async ({
             Matrix: MatrixInstance,
             m,
@@ -231,52 +181,39 @@ Do not invite anyone as a team member. Any breach of this policy may lead to imm
             text
         }) => {
             const userId = m.sender;
-            const serviceName = 'matrixbug';
-
-            premiumManager.registerService(serviceName);
-
-            // Owner bypass logic
-            if (userId === OWNER_NUMBER) {
-                console.log('[DEBUG] Owner detected, bypassing premium check.');
-            } else if (!await premiumManager.isPremium(userId, serviceName)) {
-                await MatrixInstance.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
-                return reply(
-                    `🚫 *Premium Required!*\n\n` +
-                    `This feature is for premium users only.\n` +
-                    `To use *${serviceName.toUpperCase()}*, you need an active premium subscription or All-Access Premium.\n\n` +
-                    `Type *.buy_premium* to learn more.`
-                );
-            }
-
-            await MatrixInstance.sendMessage(m.chat, { react: { text: "🐞", key: m.key } });
+            
+            await MatrixInstance.sendMessage(m.chat, { react: { text: "📺", key: m.key } }); // Changed reaction emoji for StarTimes
             await showTyping(MatrixInstance, m.chat);
-            console.log('Matrixbug command received...');
+            console.log('StarTimes command received...');
 
-            const matrixbugImageUrl = 'https://files.catbox.moe/m97u4l.jpg';
-            const matrixbugCaption = `
-🐞💚 *MatrixBug Service* 💚🐞
+            const startimesImageUrl = 'https://i.ibb.co/sdHmRxhV/1200x630wa.png'; // Direct link to the provided image
+            const downloadLink = 'https://www.mediafire.com/file/wmsjckz04qtp4ed/StarTimes.apk/file'; // Provided MediaFire link
+            const combinedStartimesMessage = `
+╔═════ ≪ •❈• ≫ ═════╗
+📊✨ 𝗦𝗧𝗔𝗥𝗧𝗜𝗠𝗘𝗦 ✨📊
+╚═════ ≪ •❈• ≫ ═════╝
 
-💡 *Welcome to the exclusive MatrixBug tool!*
+💎✨ *P R E M I U M* ✨💎
 
-✨ Here you can get all WhatsApp bug functions, premium access, and get exclusive support! ✨
+📧 *Download App:* 📧
+(${downloadLink})
 
-🔮 *Requirements* 🔮
+✨ *Features* ✨
+📺 Live TV Channels 🌟
+⚽ Sports & Movies 🎬
+🌐 On-Demand Content 🌍
+📱Multiple Device Support ⌚
 
-⏳ Telegram ID required to be added as a premium user.
+💠𝗦𝘁𝗮𝗿𝗧𝗶𝗺𝗲𝘀 𝗼𝗳𝗳𝗲𝗿𝘀 𝗮 𝗰𝗼𝗺𝗽𝗿𝗲𝗵𝗲𝗻𝘀𝗶𝘃𝗲 𝗲𝗻𝘁𝗲𝗿𝘁𝗮𝗶𝗻𝗺𝗲𝗻𝘁 𝗲𝘅𝗽𝗲𝗿𝗶𝗲𝗻𝗰𝗲 𝘄𝗶𝘁𝗵 𝗮 𝘄𝗶𝗱𝗲 𝗮𝗿𝗿𝗮𝘆 𝗼𝗳 𝗹𝗶𝘃𝗲 𝗧𝗩 𝗰𝗵𝗮𝗻𝗻𝗲𝗹𝘀, 𝘁𝗵𝗼𝘂𝘀𝗮𝗻𝗱𝘀 𝗼𝗳 𝗵𝗼𝘂𝗿𝘀 𝗼𝗳 𝗩𝗢𝗗, 𝗰𝗹𝗮𝘀𝘀𝗶𝗰 𝗺𝗼𝘃𝗶𝗲𝘀, 𝘁𝗵𝗲 𝗹𝗮𝘁𝗲𝘀𝘁 𝗱𝗿𝗮𝗺𝗮 𝘀𝗲𝗿𝗶𝗲𝘀, 𝗯𝗹𝗼𝗰𝗸𝗯𝘂𝘀𝘁𝗲𝗿𝘀, 𝗲𝘅𝗰𝗹𝘂𝘀𝗶𝘃𝗲 𝗸𝗶𝗱𝘀' 𝘀𝗵𝗼𝘄𝘀, 𝗮𝗻𝗱 𝗽𝗼𝘄𝗲𝗿𝗳𝘂𝗹 𝘀𝗽𝗼𝗿𝘁𝘀 𝗰𝗼𝗻𝘁𝗲𝗻𝘁. 𝗘𝗻𝗷𝗼𝘆 𝗵𝗶𝗴𝗵-𝗾𝘂𝗮𝗹𝗶𝘁𝘆 𝘀𝘁𝗿𝗲𝗮𝗺𝗶𝗻𝗴 𝗮𝗻𝗱 𝗮𝗰𝗰𝗲𝘀𝘀 𝘁𝗼 𝗲𝘅𝗰𝗹𝘂𝘀𝗶𝘃𝗲 𝗰𝗼𝗻𝘁𝗲𝗻𝘁 𝗮𝘁 𝘆𝗼𝘂𝗿 𝗳𝗶𝗻𝗴𝗲𝗿𝘁𝗶𝗽𝘀.💠
 
-⚠️ *Crash Bot Functions Supports:*
-
-🪇 *Android Crash*
-💡 *iOS Crash*
-🪝 *Group Crash*
-
-Dm now to unlock premium features and personalized assistance!
-Contact Owner: https://t.me/Matrixxxxxxxxx
+🌹💎🌹💎🌹💎🌹💎🌹
 `;
-            await sendMessageWithImage({ Matrix: MatrixInstance, m, imageUrl: matrixbugImageUrl, caption: matrixbugCaption });
-            console.log('Matrixbug photo, fancy caption, and inline contact button sent.');
-  }
-}, {
+            await sendMessageWithImage({ Matrix: MatrixInstance, m, imageUrl: startimesImageUrl, caption: combinedStartimesMessage });
+
+   }
+},
+
+ {
    
    command: ['webclone', 'clone'], 
     operate: async ({
@@ -286,7 +223,6 @@ Contact Owner: https://t.me/Matrixxxxxxxxx
         text // This will contain the URL directly after the command
     }) => {
         const userId = m.sender;
-        const serviceName = 'webclone';
         
         // --- Webclone Logic ---
         const urlToClone = text?.trim(); // Get the URL from the command arguments

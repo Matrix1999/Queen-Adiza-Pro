@@ -1,100 +1,59 @@
 const fs = require('fs');
+const path = require('path');
 const fsp = fs.promises;
 const contactsFilePath = './src/contacts.json';
-const path = require('path');
 const https = require('https');
 const fetch = require('node-fetch');
 const AdmZip = require("adm-zip");
 const axios = require("axios");
 const { sleep } = require('../../lib/myfunc');
+
 const { formatDateTime } = require('../../lib/myfunc');
 const { promisify } = require('util');
-const { calculateExpiry } = require('../../lib/premiumSystem'); 
+const { calculateExpiry, isPremium } = require('../../lib/premiumSystem');
+const moment = require('moment-timezone');
 const { exec } = require('child_process');
 const execAsync = promisify(exec);
-const { generateProfilePicture, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { generateProfilePicture, downloadContentFromMessage, getContentType } = require('@whiskeysockets/baileys'); 
 
 
-const filesToUpdate = [
-  // Root files
-  "talkdrove.json",
-  "index.js",
-  "system.js",
-  "settings.js",
-  "app.json",
-  "package.json",
-  "README.md",
-  "Dockerfile",
-  "heroku.yml",
 
-  // lib folder files
-  "lib/catbox.js",
-  "lib/remindme.js",
-  "lib/myfunc.js",
-  "lib/PluginManager.js",
-  "lib/converter.js",
-  "lib/reminder.json",
-  "lib/timeparser.js",
-  "lib/audio.js",
-  "lib/Readme.md",
-  "lib/antispam.js",
-  "lib/scraper.js",
-  "lib/remini.js",
-  "lib/exif.js",
-  "lib/emojis.js",
-  "lib/color.js",
 
-  // src/ files
-  "src/contacts.json",
-  "src/database.json",
-  "src/reminder.json",
-  "src/store.json",
-  "src/badwords.json",
-
-  // src/Plugins/ files
-  "src/Plugins/religion.js",
-  "src/Plugins/ai.js",
-  "src/Plugins/group.js",
-  "src/Plugins/search.js",
-  "src/Plugins/image.js",
-  "src/Plugins/heroku.js",
-  "src/Plugins/video.js",
-  "src/Plugins/fun.js",
-  "src/Plugins/audio.js",
-  "src/Plugins/reaction.js",
-  "src/Plugins/download.js",
-  "src/Plugins/ephoto360.js",
-  "src/Plugins/tools.js",
-  "src/Plugins/settings.js",
-  "src/Plugins/other.js",
-  "src/Plugins/owner.js"
-];
 
 module.exports = [
- {
+  {
   command: ['addbadword'],
-  operate: async ({ Matrix, m, isCreator, mess, prefix, args, q, bad, reply }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (args.length < 1) return reply(`Use ${prefix}addbadword [harsh word].`);
+  operate: async ({ Matrix, m, isCreator, mess, prefix, args, q, reply, db }) => {
+    // Premium/creator check
+    const isPremiumUser = typeof isPremium === "function" ? isPremium(m.sender) : false;
+    if (!isCreator && !isPremiumUser) return reply(mess.owner);
 
-    if (bad.includes(q)) {
+    if (args.length < 1) return reply(`Use ${prefix}addbadword [harsh word].`);
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+    if (!Array.isArray(db.data.users[botJid].badwords)) db.data.users[botJid].badwords = [];
+
+    const badwords = db.data.users[botJid].badwords;
+
+    if (badwords.includes(q)) {
       return reply('This word is already in the list!');
     }
 
-    bad.push(q);
+    badwords.push(q);
 
     try {
-      await fsp.writeFile('./src/badwords.json', JSON.stringify(bad, null, 2));
+      await db.write();
       reply('Successfully added bad word!');
     } catch (error) {
-      console.error('Error writing to badwords.json:', error);
+      console.error('Error writing to badwords:', error);
       reply('An error occurred while adding the bad word.');
     }
   }
-}, {
+}, 
+ {
   command: ['addignorelist'],
-  operate: async ({ m, args, isCreator, mess, reply }) => { // Removed loadBlacklist, assuming db access
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, args, isCreator, mess, reply, db }) => { 
+    // if (!isCreator) return reply(mess.owner);
 
     let mentionedUser = m.mentionedJid && m.mentionedJid[0];
     let quotedUser = m.quoted && m.quoted.sender;
@@ -102,131 +61,185 @@ module.exports = [
 
     if (!userToAdd) return reply('Mention a user, reply to their message, or provide a phone number to ignore.');
 
-    let blacklist = global.db.data.blacklist;
-    if (!blacklist.blacklisted_numbers.includes(userToAdd)) {
-        blacklist.blacklisted_numbers.push(userToAdd);
-        await global.db.write(); // Save changes to the database
-        reply(`${userToAdd} added to the ignore list.`);
+    // Get bot instance JID
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    // Ensure per-bot user settings exist
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+    if (!Array.isArray(db.data.users[botJid].ignorelist)) db.data.users[botJid].ignorelist = [];
+
+    let ignorelist = db.data.users[botJid].ignorelist;
+    if (!ignorelist.includes(userToAdd)) {
+        ignorelist.push(userToAdd);
+        await db.write(); // Save changes to the database
+        reply(`${userToAdd} added to the ignore list for this bot instance.`);
     } else {
-        reply(`${userToAdd} is already ignored.`);
+        reply(`${userToAdd} is already ignored by this bot instance.`);
     }
   }
-},
+}, 
+
   {
   command: ['autobio'],
-  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db, botNumber }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db }) => {
     if (args.length < 1) return reply(`Example: ${prefix + command} on/off`);
 
     const validOptions = ["on", "off"];
     const option = args[0].toLowerCase();
+    if (!validOptions.includes(option)) return reply("Invalid option. Use 'on' or 'off'.");
 
-    if (!validOptions.includes(option)) return reply("Invalid option");
+    // Get the bot's WhatsApp JID (bot instance ID)
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
 
-    db.data.settings.autobio = option === "on";
-    await db.write(); // Save changes to the database
-    reply(`Auto-bio ${option === "on" ? "enabled" : "disabled"} successfully`);
+    // Ensure the users object for this bot exists
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+
+    // Set the autobio value for this bot only
+    db.data.users[botJid].autobio = option === "on";
+    await db.write();
+
+    reply(`✅ Auto-bio ${option === "on" ? "enabled" : "disabled"} successfully for this bot instance.`);
   }
-},
- {
+}, 
+
+{
   command: ['autoread'],
-  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db, botNumber }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db }) => {
+    // Allow creator or premium users
+    const isPremiumUser = typeof isPremium === "function" ? isPremium(m.sender) : false;
+    if (!isCreator && !isPremiumUser) return reply(mess.owner);
     if (args.length < 1) return reply(`Example: ${prefix + command} on/off`);
 
     const validOptions = ["on", "off"];
     const option = args[0].toLowerCase();
 
-    if (!validOptions.includes(option)) return reply("Invalid option");
+    if (!validOptions.includes(option)) return reply("Invalid option.");
 
-    db.data.settings.autoread = option === "on";
-    await db.write(); // Save changes to the database
-    reply(`Auto-read ${option === "on" ? "enabled" : "disabled"} successfully`);
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+
+    db.data.users[botJid].autoread = option === "on";
+    await db.write();
+    reply(`Auto-read ${option === "on" ? "enabled" : "disabled"} successfully for this bot instance.`);
   }
-}, {
+},
+{
   command: ['autorecord', 'autorecording'],
-  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db, botNumber }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db }) => {
+    const isPremiumUser = typeof isPremium === "function" ? isPremium(m.sender) : false;
+    if (!isCreator && !isPremiumUser) return reply(mess.owner);
     if (args.length < 1) return reply(`Example: ${prefix + command} on/off`);
 
     const validOptions = ["on", "off"];
     const option = args[0].toLowerCase();
 
-    if (!validOptions.includes(option)) return reply("Invalid option");
+    if (!validOptions.includes(option)) return reply("Invalid option.");
 
-    db.data.settings.autorecord = option === "on";
-    await db.write(); // Save changes to the database
-    reply(`Auto-record ${option === "on" ? "enabled" : "disabled"} successfully`);
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+
+    db.data.users[botJid].autorecord = option === "on";
+    await db.write();
+    reply(`Auto-record ${option === "on" ? "enabled" : "disabled"} successfully for this bot instance.`);
   }
 },
-  {
+{
   command: ['autotype', 'autotyping'],
-  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db, botNumber }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db }) => {
+    const isPremiumUser = typeof isPremium === "function" ? isPremium(m.sender) : false;
+    if (!isCreator && !isPremiumUser) return reply(mess.owner);
     if (args.length < 1) return reply(`Example: ${prefix + command} on/off`);
 
     const validOptions = ["on", "off"];
     const option = args[0].toLowerCase();
 
-    if (!validOptions.includes(option)) return reply("Invalid option");
+    if (!validOptions.includes(option)) return reply("Invalid option.");
 
-    db.data.settings.autotype = option === "on";
-    await db.write(); // Save changes to the database
-    reply(`Auto-typing ${option === "on" ? "enabled" : "disabled"} successfully`);
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+
+    db.data.users[botJid].autotype = option === "on";
+    await db.write();
+    reply(`Auto-typing ${option === "on" ? "enabled" : "disabled"} successfully for this bot instance.`);
   }
 },
- {
+{
   command: ['autorecordtyping', 'autorecordtype'],
-  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db, botNumber }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, args, prefix, command, isCreator, mess, db }) => {
+    const isPremiumUser = typeof isPremium === "function" ? isPremium(m.sender) : false;
+    if (!isCreator && !isPremiumUser) return reply(mess.owner);
     if (args.length < 1) return reply(`Example: ${prefix + command} on/off`);
 
     const validOptions = ["on", "off"];
     const option = args[0].toLowerCase();
 
-    if (!validOptions.includes(option)) return reply("Invalid option");
+    if (!validOptions.includes(option)) return reply("Invalid option.");
 
-    db.data.settings.autorecordtype = option === "on";
-    await db.write(); // Save changes to the database
-    reply(`Auto-record typing ${option === "on" ? "enabled" : "disabled"} successfully`);
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+
+    db.data.users[botJid].autorecordtype = option === "on";
+    await db.write();
+    reply(`Auto-record typing ${option === "on" ? "enabled" : "disabled"} successfully for this bot instance.`);
   }
 },
+
  {
   command: ['block'],
   operate: async ({ Matrix, m, reply, isCreator, mess, text }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!m.quoted && !m.mentionedJid[0] && !text) return reply("Reply to a message or mention/user ID to block");
+    // This line was here: if (!isCreator) return reply(mess.owner);
 
-    const userId = m.mentionedJid[0] || m.quoted?.sender || text.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+    // Fixed safety check for mentions (from previous discussion):
+    if (!m.quoted && (!m.mentionedJid || m.mentionedJid.length === 0) && !text) {
+      return reply("Reply to a message or mention/user ID to block");
+    }
+
+    // Fixed userId assignment (from previous discussion):
+    const userId = (m.mentionedJid && m.mentionedJid[0]) || m.quoted?.sender || (text ? text.replace(/[^0-9]/g, "") + "@s.whatsapp.net" : null);
+
+    // Added check for null userId (from previous discussion):
+    if (!userId) {
+        return reply("Could not determine user to block. Please reply to a message, mention a user, or provide a valid number.");
+    }
+
     await Matrix.updateBlockStatus(userId, "block");
     reply(mess.done);
   }
-}, {
-  command: ['deletebadword'],
-  operate: async ({ Matrix, m, isCreator, mess, prefix, args, q, bad, reply }) => {
-    if (!isCreator) return reply(mess.owner);
+},
+{
+  command: ['deletebadword', 'delbadword', 'removebadword'],
+  operate: async ({ Matrix, m, isCreator, mess, prefix, args, q, reply, db }) => {
+    // Premium/creator check
+    const isPremiumUser = typeof isPremium === "function" ? isPremium(m.sender) : false;
+    if (!isCreator && !isPremiumUser) return reply(mess.owner);
+
     if (args.length < 1) return reply(`Use ${prefix}deletebadword [harsh word].`);
 
-    const index = bad.indexOf(q);
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+    if (!Array.isArray(db.data.users[botJid].badwords)) db.data.users[botJid].badwords = [];
+
+    const badwords = db.data.users[botJid].badwords;
+
+    const index = badwords.indexOf(q);
     if (index === -1) {
       return reply('This word is not in the list!');
     }
 
-    bad.splice(index, 1);
+    badwords.splice(index, 1);
 
     try {
-      await fsp.writeFile('./src/badwords.json', JSON.stringify(bad, null, 2));
+      await db.write();
       reply('Successfully deleted bad word!');
     } catch (error) {
-      console.error('Error writing to badwords.json:', error);
+      console.error('Error writing to badwords:', error);
       reply('An error occurred while deleting the bad word.');
     }
   }
-},
- {
+}, 
+{
   command: ['delete', 'del'],
   operate: async ({ Matrix, m, reply, isCreator, mess }) => {
-    if (!isCreator) return reply(mess.owner);
+ //   if (!isCreator) return reply(mess.owner);
     if (!m.quoted) return reply(`*Please reply to a message*`);
 
     let key = {};
@@ -246,9 +259,8 @@ module.exports = [
   }
 },
 {
-  command: ['delignorelist'],
-  operate: async ({ m, args, isCreator, mess, reply }) => { // Removed loadBlacklist, assuming db access
-    if (!isCreator) return reply(mess.owner);
+  command: ['delignorelist', 'removeignorelist'],
+  operate: async ({ Matrix, m, args, isCreator, mess, reply, db }) => { 
 
     let mentionedUser = m.mentionedJid && m.mentionedJid[0];
     let quotedUser = m.quoted && m.quoted.sender;
@@ -256,17 +268,24 @@ module.exports = [
 
     if (!userToRemove) return reply('Mention a user, reply to their message, or provide a phone number to remove from the ignore list.');
 
-    let blacklist = global.db.data.blacklist;
-    let index = blacklist.blacklisted_numbers.indexOf(userToRemove);
+    // Get bot instance JID
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    // Ensure per-bot user settings exist
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+    if (!Array.isArray(db.data.users[botJid].ignorelist)) db.data.users[botJid].ignorelist = [];
+
+    let ignorelist = db.data.users[botJid].ignorelist;
+    let index = ignorelist.indexOf(userToRemove);
     if (index !== -1) {
-        blacklist.blacklisted_numbers.splice(index, 1);
-        await global.db.write(); // Save changes to the database
-        reply(`${userToRemove} removed from the ignore list.`);
+        ignorelist.splice(index, 1);
+        await db.write(); // Save changes to the database
+        reply(`${userToRemove} removed from the ignore list for this bot instance.`);
     } else {
-        reply(`${userToRemove} is not in the ignore list.`);
+        reply(`${userToRemove} is not in the ignore list for this bot instance.`);
     }
   }
-},
+}, 
+
  {
   command: ['deljunk', 'deletejunk', 'clearjunk'],
   operate: async (context) => {
@@ -323,107 +342,12 @@ module.exports = [
       reply("*Successfully cleared all the junk files in the tmp folder*");
     });
   }
-}, {
-  command: ["vv"],
-  react: "👾",
-  desc: "Owner Only - retrieve quoted view-once message",
-  category: "owner",
-  operate: async ({
-    Matrix: _0x4e1b84,
-    m: _0x2650b3,
-    reply: _0x6c7b71,
-    isCreator: _0x4f2f8f
-  }) => {
-    // React with ⏳ at start
-    await _0x4e1b84.sendMessage(_0x2650b3.chat, {
-      react: {
-        text: "⏳",
-        key: _0x2650b3.key
-      }
-    });
+},
 
-    try {
-      if (!_0x4f2f8f) {
-        await _0x4e1b84.sendMessage(_0x2650b3.chat, {
-          react: { text: "❌", key: _0x2650b3.key }
-        });
-        return _0x4e1b84.sendMessage(_0x2650b3.chat, {
-          text: "*📛 This is an owner command.*"
-        }, { quoted: _0x2650b3 });
-      }
-
-      if (!_0x2650b3.quoted) {
-        await _0x4e1b84.sendMessage(_0x2650b3.chat, {
-          react: { text: "❌", key: _0x2650b3.key }
-        });
-        return _0x4e1b84.sendMessage(_0x2650b3.chat, {
-          text: "*🍁 Please reply to a view once message!*"
-        }, { quoted: _0x2650b3 });
-      }
-
-      const _0x3df0f6 = await _0x2650b3.quoted.download();
-      const _0x537cd4 = _0x2650b3.quoted.mtype;
-      const _0x4cc45c = { quoted: _0x2650b3 };
-
-      let _0x5c3ec6 = {};
-      switch (_0x537cd4) {
-        case "imageMessage":
-          _0x5c3ec6 = {
-            image: _0x3df0f6,
-            caption: _0x2650b3.quoted.text || '',
-            mimetype: _0x2650b3.quoted.mimetype || "image/jpeg"
-          };
-          break;
-        case "videoMessage":
-          _0x5c3ec6 = {
-            video: _0x3df0f6,
-            caption: _0x2650b3.quoted.text || '',
-            mimetype: _0x2650b3.quoted.mimetype || "video/mp4"
-          };
-          break;
-        case "audioMessage":
-          _0x5c3ec6 = {
-            audio: _0x3df0f6,
-            mimetype: "audio/mp4",
-            ptt: _0x2650b3.quoted.ptt || false
-          };
-          break;
-        default:
-          await _0x4e1b84.sendMessage(_0x2650b3.chat, {
-            react: { text: "❌", key: _0x2650b3.key }
-          });
-          return _0x4e1b84.sendMessage(_0x2650b3.chat, {
-            text: "❌ Only image, video, and audio messages are supported"
-          }, { quoted: _0x2650b3 });
-      }
-
-      await _0x4e1b84.sendMessage(_0x2650b3.chat, _0x5c3ec6, _0x4cc45c);
-
-      // React with ✅ on success
-      await _0x4e1b84.sendMessage(_0x2650b3.chat, {
-        react: {
-          text: "✅",
-          key: _0x2650b3.key
-        }
-      });
-
-    } catch (_0x3e1173) {
-      console.error("vv Error:", _0x3e1173);
-      await _0x4e1b84.sendMessage(_0x2650b3.chat, {
-        react: {
-          text: "❌",
-          key: _0x2650b3.key
-        }
-      });
-      await _0x4e1b84.sendMessage(_0x2650b3.chat, {
-        text: "❌ Error fetching vv message:\n" + _0x3e1173.message
-      }, { quoted: _0x2650b3 });
-    }
-  }
-},  {
+  {
   command: ['vv1'],
   operate: async ({ Matrix, m, reply, isCreator, mess }) => {
-    if (!isCreator) return reply(mess.owner);
+    //if (!isCreator) return reply(mess.owner);
     if (!m.quoted) return reply(`*Please reply to a view once message!*`);
 
     let msg = m.msg?.contextInfo?.quotedMessage
@@ -449,62 +373,88 @@ module.exports = [
   }
 }, {
   command: ["vv2"],
-  operate: async ({ Matrix: David, m, reply, isCreator, mime, quoted, q }) => {
+  operate: async ({
+    Matrix,
+    m,
+    reply,
+    isCreator,
+    mime, // This mime is from the CURRENT message 'm', not the quoted one.
+    quoted, // This is the serialized m.quoted object.
+    q,
+    mess // isPremium is NOT here
+  }) => {
     // React with a floppy disk emoji to indicate saving
-    await David.sendMessage(m.chat, { react: { text: `💾`, key: m.key } });
+    await Matrix.sendMessage(m.chat, { react: { text: `💾`, key: m.key } });
 
-    if (!isCreator) {
-      await David.sendMessage(m.chat, { react: { text: `❌`, key: m.key } });
-      return reply('For My Owner Only');
+    // Allow Creator OR Premium users (isPremium is from the top-level import)
+    const isSenderPremium = isPremium(m.sender);
+    if (!isCreator && !isSenderPremium) {
+      await Matrix.sendMessage(m.chat, { react: { text: `❌`, key: m.key } });
+      return reply(mess.owner || mess.premium);
+    }
+
+    // Check if m.quoted exists and if it has raw message content
+    if (!m.quoted || !m.quoted.message) {
+      await Matrix.sendMessage(m.chat, { react: { text: `❓`, key: m.key } });
+      return reply('Reply to a Video, Image, or Audio You Want to Save');
+    }
+
+    // Access the raw quoted message content
+    const rawQuotedMessageContent = m.quoted.message;
+    const quotedMessageTypeInRaw = Object.keys(rawQuotedMessageContent)[0]; // e.g., 'imageMessage', 'videoMessage', 'audioMessage'
+
+    let mediaTypeForDownload; // This will be 'image', 'video', or 'audio'
+    if (quotedMessageTypeInRaw === 'videoMessage') {
+      mediaTypeForDownload = 'video';
+    } else if (quotedMessageTypeInRaw === 'imageMessage') {
+      mediaTypeForDownload = 'image';
+    } else if (quotedMessageTypeInRaw === 'audioMessage') {
+      mediaTypeForDownload = 'audio';
+    } else {
+      await Matrix.sendMessage(m.chat, { react: { text: `❓`, key: m.key } });
+      return reply('Reply to a Video, Image, or Audio You Want to Save'); // Not a supported media type
     }
 
     try {
-      let mediaType;
-
-      if (/video/.test(mime)) {
-        mediaType = 'video';
-      } else if (/image/.test(mime)) {
-        mediaType = 'image';
-      } else if (/audio/.test(mime)) {
-        mediaType = 'audio';
-      } else {
-        await David.sendMessage(m.chat, { react: { text: `❓`, key: m.key } });
-        return reply('Reply to a Video, Image, or Audio You Want to Save');
-      }
-
-      const mediaFile = await David.downloadAndSaveMediaMessage(quoted);
+      // Pass the raw quoted message content to downloadAndSaveMediaMessage
+      // This function expects a message content object (e.g., m.message.imageMessage)
+      const mediaFile = await Matrix.downloadAndSaveMediaMessage(rawQuotedMessageContent[quotedMessageTypeInRaw], mediaTypeForDownload);
       const messageOptions = {
-        caption: q || ''
+        caption: q || rawQuotedMessageContent[quotedMessageTypeInRaw]?.caption || '' // Use q or caption from original if q is empty
       };
 
-      messageOptions[mediaType] = {
+      messageOptions[mediaTypeForDownload] = {
         url: mediaFile
       };
 
-      await David.sendMessage(m.sender, messageOptions, { quoted: m });
-      await David.sendMessage(m.chat, { react: { text: `✅`, key: m.key } });
+      // Send to the sender of the command (your DM)
+      await Matrix.sendMessage(m.sender, messageOptions, { quoted: m });
+      await Matrix.sendMessage(m.chat, { react: { text: `✅`, key: m.key } });
+
+      // Clean up the temporary file after sending
+      if (fs.existsSync(mediaFile)) {
+        fs.unlinkSync(mediaFile);
+      }
+
     } catch (error) {
-      console.error("Error saving media:", error);
-      await David.sendMessage(m.chat, { react: { text: `🚫`, key: m.key } });
-      reply('Failed to save and send the media.');
+      console.error("vv2 Error:", error);
+      await Matrix.sendMessage(m.chat, { react: { text: `🚫`, key: m.key } });
+      reply(`Failed to save and send the media: ${error.message}`);
     }
   }
-}, {
+},
+ {
   command: ['disk'],
-  operate: async ({ Matrix, m, reply, isCreator, mess }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ reply }) => {
+    await reply('Please wait...');
 
-    await reply('Please Wait');
-
-    let o;
     try {
-      o = await execAsync('cd && du -h --max-depth=1');
+      const { stdout, stderr } = await execAsync('cd && du -h --max-depth=1');
+      if (stdout && stdout.trim()) await reply(stdout.trim());
+      if (stderr && stderr.trim()) await reply(stderr.trim());
     } catch (e) {
-      o = e;
-    } finally {
-      let { stdout, stderr } = o;
-      if (stdout.trim()) reply(stdout);
-      if (stderr.trim()) reply(stderr);
+      console.error('[disk] Error:', e);
+      await reply('❌ Failed to fetch disk usage.\n' + (e.stderr || e.message || 'Unknown error.'));
     }
   }
 }, {
@@ -560,337 +510,208 @@ module.exports = [
   }
 }, {
   command: ["getpp"],
-  operate: async ({ Matrix: David, m, reply, prefix }) => {
+  operate: async ({ Matrix, m, reply, prefix }) => { // De-obfuscated David to Matrix
     // React with a camera emoji to indicate fetching profile picture
-    await David.sendMessage(m.chat, { react: { text: "📸", key: m.key } });
+    await Matrix.sendMessage(m.chat, { react: { text: "📸", key: m.key } }); // De-obfuscated David to Matrix
 
     if (!m.quoted && (!m.mentionedJid || m.mentionedJid.length === 0)) {
-      await David.sendMessage(m.chat, { react: { text: "❓", key: m.key } });
+      await Matrix.sendMessage(m.chat, { react: { text: "❓", key: m.key } }); // De-obfuscated David to Matrix
       return reply(`Reply to someone's message or tag a user with ${prefix}getpp`);
     }
 
     try {
       const targetUser = m.quoted ? m.quoted.sender : m.mentionedJid[0];
-      const profilePicUrl = await David.profilePictureUrl(targetUser, 'image').catch(() => null);
+      const profilePicUrl = await Matrix.profilePictureUrl(targetUser, 'image').catch(() => null); // De-obfuscated David to Matrix
       const responseMessage = `Profile picture of @${targetUser.split('@')[0]}`;
-      await David.sendMessage(m.chat, {
+      await Matrix.sendMessage(m.chat, {
         image: { url: profilePicUrl },
         caption: responseMessage,
         mentions: [targetUser]
       });
       // React with a checkmark on successful retrieval
-      await David.sendMessage(m.chat, { react: { text: "✅", key: m.key } });
+      await Matrix.sendMessage(m.chat, { react: { text: "✅", key: m.key } }); // De-obfuscated David to Matrix
     } catch (error) {
       console.error("Error fetching profile picture:", error);
       // React with an 'X' on failure
-      await David.sendMessage(m.chat, { react: { text: "❌", key: m.key } });
+      await Matrix.sendMessage(m.chat, { react: { text: "❌", key: m.key } }); // De-obfuscated David to Matrix
       reply("Couldn't fetch profile picture. The user might not have a profile picture or an error occurred.");
     }
   }
 }, {
-  command: ["checkupdate", "check"],
-  tags: ["owner"],
-  help: ["checkupdate"],
-  operate: async ({ Matrix, m, reply }) => {
-    try {
-      const fs = require("fs");
-      const path = require("path");
-      const axios = require("axios");
+  command: ["whois"],
+  operate: async ({ Matrix, m, reply, prefix, args }) => {
+    // Indicate processing
+    await Matrix.sendMessage(m.chat, { react: { text: "🕵️", key: m.key } });
 
-      await Matrix.sendMessage(m.chat, {
-        text: "🔍 Checking for new updates... Please wait.",
-        react: { text: "✅", key: m.key }
-      });
+    let targetUserJid, inputNumber = "";
 
-      const repoUrl = "https://api.github.com/repos/Matrix1999/Queen-Adiza/commits/main";
-      const response = await axios.get(repoUrl, {
-        headers: { "User-Agent": "Mozilla/5.0" }
-      });
-
-      const latestCommitHash = response.data.sha;
-      const commitFilePath = path.join(__dirname, "..", "current_commit.json");
-
-      if (fs.existsSync(commitFilePath)) {
-        const currentCommit = JSON.parse(fs.readFileSync(commitFilePath, "utf-8")).commitHash;
-
-        if (currentCommit !== latestCommitHash) {
-          await reply("⚡️ *New update available!* A new version of the bot has been released.\nUse the `.update` command to fetch the latest changes.");
-          fs.writeFileSync(commitFilePath, JSON.stringify({ commitHash: latestCommitHash }, null, 2));
+    // 1. Try to get target JID from mention
+    if (m.mentionedJid?.[0]) {
+      targetUserJid = m.mentionedJid[0];
+      console.log(`[WHOIS] Target from mention: ${targetUserJid}`);
+    }
+    // 2. Try from quoted message
+    else if (m.quoted?.sender) {
+      targetUserJid = m.quoted.sender;
+    }
+    // 3. Try from argument (number)
+    else if (args[0]) {
+      inputNumber = args[0].replace(/\D/g, "");
+      if (inputNumber) {
+        // Ghana default country code logic
+        if (inputNumber.length === 9 && !inputNumber.startsWith("233")) {
+          targetUserJid = `233${inputNumber}@s.whatsapp.net`;
         } else {
-          await reply("✅ *Your bot is up-to-date!* No new updates found.");
+          targetUserJid = `${inputNumber}@s.whatsapp.net`;
         }
-      } else {
-        fs.writeFileSync(commitFilePath, JSON.stringify({ commitHash: latestCommitHash }, null, 2));
-        await reply("✅ *Bot is now set up to check updates!* Type .check or .checkupdate once again");
-      }
-    } catch (err) {
-      console.error("Update Check Error:", err.message);
-      await reply("❌ *Error checking for updates!* Please try again later.");
-    }
-  }
-}, {
-  command: ['github-update'],
-  tags: ['owner'],
-  desc: 'Update one or more files from GitHub, or list all updatable files',
-  operate: async ({ isCreator, reply, args }) => {
-    if (!isCreator) return reply("🚫 Only the bot owner can use this command.");
-
-    // If no argument, show the list
-    if (!args[0]) {
-      let listText = "*Available files to update:*\n";
-      filesToUpdate.forEach(f => listText += `- ${f}\n`);
-      listText += "\n_Usage: .github-update <file1> <file2> ..._\nExample: .github-update system.js index.js src/Plugins/ai.js";
-      return reply(listText);
-    }
-
-    // Support multiple files: .github-update file1 file2 file3
-    const files = args.map(f => f.trim()).filter(f => filesToUpdate.includes(f));
-    const notAllowed = args.filter(f => !filesToUpdate.includes(f.trim()));
-
-    if (files.length === 0) {
-      return reply(`❌ None of the files you requested are in the update list.\nType .github-update to see the list.`);
-    }
-
-    if (notAllowed.length > 0) {
-      await reply(`⚠️ These files are not allowed or not found and will be skipped: ${notAllowed.join(', ')}`);
-    }
-
-    const owner = "Matrix1999";
-    const repo = "Queen-Adiza";
-    const branch = "main";
-
-    let updated = [];
-    let failed = [];
-
-    for (const fileArg of files) {
-      const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${fileArg}`;
-      const localFilePath = path.join('./', fileArg);
-
-      try {
-        await reply(`⬇️ Downloading: ${fileArg}`);
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
-        const content = await res.text();
-
-        fs.mkdirSync(path.dirname(localFilePath), { recursive: true });
-        fs.writeFileSync(localFilePath, content, 'utf8');
-        updated.push(fileArg);
-      } catch (error) {
-        failed.push(fileArg);
-        await reply(`❌ Failed to update ${fileArg}: ${error.message}`);
+        console.log(`[WHOIS] Target from argument: ${targetUserJid}`);
       }
     }
 
-    if (updated.length > 0) {
-      await reply(`✅ Successfully updated: ${updated.join(', ')}`);
-      await reply("♻️ Restarting bot in 3 seconds...");
-      setTimeout(() => process.exit(0), 3000);
-    } else {
-      await reply("❌ No files were updated.");
+    // If no target, show usage
+    if (!targetUserJid) {
+      await Matrix.sendMessage(m.chat, { react: { text: "❓", key: m.key } });
+      return reply(
+        `*Usage:*\n${prefix}whois <mention/reply/number>\n` +
+        `*Examples:*\n${prefix}whois @user\n${prefix}whois (reply to message)\n${prefix}whois 233544981163`
+      );
     }
-  }
-}, {
-  command: ["update"],
-  tags: ["owner"],
-  help: ["update"],
-  operate: async ({ Matrix, m, text, reply }) => {
+
     try {
-      const fs = require("fs");
-      const path = require("path");
-      const axios = require("axios");
-      const AdmZip = require("adm-zip");
-
-      const steps = [
-        "Queen-Adiza Bot Updating...🚀",
-        "📦 Downloading the latest code...",
-        "⌛ Extracting the latest code...",
-        "🔄 Replacing files...",
-        "♻️ Finalizing and restarting..."
-      ];
-
-      await Matrix.sendMessage(m.chat, {
-        text: steps[0],
-        react: { text: "🔍", key: m.key }
-      });
-
-      const pkgPath = path.join(process.cwd(), "package.json");
-
-      //This loop will continue until a successful update
-      while(true){
-        const packageJson = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-        const { data: commitInfo } = await axios.get("https://api.github.com/repos/Matrix1999/Queen-Adiza/commits/main");
-        const latestCommit = commitInfo.sha;
-        const currentCommit = packageJson.commitHash || "unknown";
-
-        if (latestCommit === currentCommit) {
-          return reply("```✅ Your Queen-Adiza bot is already up-to-date!```");
-        }
-
-        await Matrix.sendMessage(m.chat, {
-          text: steps[1],
-          react: { text: "📦", key: m.key }
-        });
-
-        const zipPath = path.join(process.cwd(), "latest.zip");
-        const { data: zipData } = await axios.get("https://github.com/Matrix1999/Queen-Adiza/archive/main.zip", {
-          responseType: "arraybuffer"
-        });
-        fs.writeFileSync(zipPath, zipData);
-
-        await Matrix.sendMessage(m.chat, {
-          text: steps[2],
-          react: { text: "✅", key: m.key }
-        });
-
-        const extractPath = path.join(process.cwd(), "latest");
-        const zip = new AdmZip(zipPath);
-        zip.extractAllTo(extractPath, true);
-
-        const extractedFolder = path.join(extractPath, "Queen-Adiza-main");
-        if (!fs.existsSync(extractedFolder)) throw new Error("Extracted folder not found.");
-
-        function copyFolderSync(from, to) {
-          if (!fs.existsSync(to)) fs.mkdirSync(to, { recursive: true });
-          const items = fs.readdirSync(from);
-          for (const item of items) {
-            const src = path.join(from, item);
-            const dest = path.join(to, item);
-            if (fs.lstatSync(src).isDirectory()) {
-              copyFolderSync(src, dest);
-            } else {
-              fs.copyFileSync(src, dest);
-            }
-          }
-        }
-
-        copyFolderSync(extractedFolder, process.cwd());
-
-        await Matrix.sendMessage(m.chat, {
-          text: steps[3],
-          react: { text: "🔄", key: m.key }
-        });
-
-        fs.unlinkSync(zipPath);
-        fs.rmSync(extractPath, { recursive: true, force: true });
-
-        // Rebuild package.json with commitHash right after description
-        const finalPkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-        const reorderedPkg = {
-          name: finalPkg.name,
-          version: finalPkg.version,
-          description: finalPkg.description,
-          commitHash: latestCommit,
-          main: finalPkg.main,
-          engines: finalPkg.engines,
-          scripts: finalPkg.scripts,
-          author: finalPkg.author,
-          license: finalPkg.license,
-          dependencies: finalPkg.dependencies
-        };
-        fs.writeFileSync(pkgPath, JSON.stringify(reorderedPkg, null, 2));
-
-        await Matrix.sendMessage(m.chat, {
-          text: steps[4],
-          react: { text: "♻️", key: m.key }
-        });
-
-        reply("```✅ Bot updated and restarted successfully!```");
-
-        setTimeout(() => {
-          process.exit(0);
-        }, 2000);
-        break; //Exit the loop after a successful update
+      // Check if user exists
+      const userInfo = await Matrix.onWhatsApp(targetUserJid);
+      if (!userInfo?.[0]?.exists) {
+        await Matrix.sendMessage(m.chat, { react: { text: "❌", key: m.key } });
+        return reply(`❌ User *${targetUserJid.split('@')[0]}* not found on WhatsApp.\n(Input: ${inputNumber})`);
       }
-    } catch (err) {
-      console.error("Update error:", err);
-      reply("❌ Update failed. Please try manually.");
+      const resolvedJid = userInfo[0].jid;
+
+      // Fetch profile picture
+      let profilePicUrl = null;
+      try {
+        profilePicUrl = await Matrix.profilePictureUrl(resolvedJid, "image");
+      } catch (e) {}
+
+      // Fetch display name
+      let displayName = resolvedJid.split("@")[0];
+      try {
+        const fetchedName = await Matrix.getName(resolvedJid);
+        if (fetchedName) displayName = fetchedName;
+      } catch (e) {}
+
+      // Compose info message (About Status removed)
+      const infoMessage = [
+        `*👤🌹User Information🌹👤*`,
+        ``,
+        `*• 🥂Name:* ${displayName}`,
+        `*• 🎓JID:* ${resolvedJid}`,
+        `*• ☎Phone Number:* ${resolvedJid.split("@")[0]}`
+      ].join("\n");
+
+      // Send with or without profile picture
+      if (profilePicUrl) {
+        await Matrix.sendMessage(
+          m.chat,
+          { image: { url: profilePicUrl }, caption: infoMessage, mentions: [resolvedJid] },
+          { quoted: m }
+        );
+      } else {
+        await Matrix.sendMessage(
+          m.chat,
+          { text: infoMessage, mentions: [resolvedJid] },
+          { quoted: m }
+        );
+      }
+
+      await Matrix.sendMessage(m.chat, { react: { text: "✅", key: m.key } });
+
+    } catch (error) {
+      console.error(`[WHOIS] Error for input ${inputNumber} (${targetUserJid}):`, error);
+      await Matrix.sendMessage(m.chat, { react: { text: "🚫", key: m.key } });
+      reply(
+        "❌ *Error fetching user information.*\n" +
+        "• The user may have privacy restrictions.\n" +
+        "• The number may be invalid or not in WhatsApp format.\n" +
+        "• There may be a temporary server issue."
+      );
     }
   }
-}, {
+},
+
+ {
   command: ["userinfo"],
-  operate: async ({ Matrix: Matrix, m, reply, prefix }) => {
+  operate: async ({ Matrix, m, reply, prefix }) => {
+    // Ensure user is replying or mentioning someone
     if (!m.quoted && (!m.mentionedJid || m.mentionedJid.length === 0)) {
       return reply(`Reply to someone's message or tag a user with ${prefix}userinfo`);
     }
 
     try {
+      // Get the target user JID
       const targetUser = m.quoted ? m.quoted.sender : m.mentionedJid[0];
       const phoneNumber = targetUser.split('@')[0];
 
-      // Fetch profile picture
-      const profilePicUrl = await Matrix.profilePictureUrl(targetUser, 'image').catch(() => null);
+      // Try to fetch profile picture URL
+      let profilePicUrl = null;
+      try {
+        profilePicUrl = await Matrix.profilePictureUrl(targetUser, 'image');
+      } catch (e) {
+        // If privacy settings block it, ignore the error
+        profilePicUrl = null;
+      }
+
+      // Try to fetch display name from contacts or fallback to phone number
+      let displayName = Matrix.contacts?.[targetUser]?.notify
+        || Matrix.contacts?.[targetUser]?.name
+        || Matrix.contacts?.[targetUser]?.verifiedName
+        || phoneNumber;
 
       const userInfoMessage = `
 *User Info:*
+- Name: ${displayName}
 - JID: ${targetUser}
 - Phone Number: ${phoneNumber}
 ${profilePicUrl ? `- Profile Picture: [Click Here](${profilePicUrl})` : '- No Profile Picture'}
       `.trim();
 
-      await Matrix.sendMessage(m.chat, {
-        image: profilePicUrl ? { url: profilePicUrl } : undefined,
-        caption: userInfoMessage,
-        mentions: [targetUser]
-      });
+      // Send image if available, otherwise just text
+      if (profilePicUrl) {
+        await Matrix.sendMessage(m.chat, {
+          image: { url: profilePicUrl },
+          caption: userInfoMessage,
+          mentions: [targetUser]
+        }, { quoted: m });
+      } else {
+        await Matrix.sendMessage(m.chat, {
+          text: userInfoMessage,
+          mentions: [targetUser]
+        }, { quoted: m });
+      }
 
     } catch (error) {
       console.error("Error fetching user info:", error);
-      reply("Couldn't fetch user information. The user might have privacy settings enabled.");
+      reply("Couldn't fetch user information. The user might have privacy settings enabled or there was an error.");
     }
-  }
-}, {
-  command: ["groupid", "idgc"],
-  operate: async ({
-    Matrix: _0x858a65,
-    m: _0x263681,
-    reply: _0x52fd2c,
-    isCreator: _0x28b98e,
-    mess: _0x154c39,
-    args: _0x11dc19,
-    q: _0x286173
-  }) => {
-    if (!_0x28b98e) {
-      return _0x52fd2c(_0x154c39.owner);
-    }
-    if (!_0x286173) {
-      return _0x52fd2c("Please provide a group link!");
-    }
-    let _0x3ade33 = _0x11dc19.join(" ");
-    let _0x2903f0 = _0x3ade33.split("https://chat.whatsapp.com/")[1];
-    if (!_0x2903f0) {
-      return _0x52fd2c("Link Invalid");
-    }
-    _0x858a65.query({
-      tag: "iq",
-      attrs: {
-        type: "get",
-        xmlns: "w:g2",
-        to: "@g.us"
-      },
-      content: [{
-        tag: "invite",
-        attrs: {
-          code: _0x2903f0
-        }
-      }]
-    }).then(async _0x186d1c => {
-      const _0x5ea06e = "" + (_0x186d1c.content[0].attrs.id ? _0x186d1c.content[0].attrs.id : "undefined");
-      _0x52fd2c(_0x5ea06e + "@g.us");
-    });
-  }
-}, {
-  command: ['gcaddprivacy'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, prefix, command, text, args }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!text) return reply(`Options: all/contacts/contact_blacklist/none\nExample: ${prefix + command} all`);
-
-    const validOptions = ["all", "contacts", "contact_blacklist"];
-    if (!validOptions.includes(args[0])) return reply("*Invalid option!*");
-
-    await Matrix.updateGroupsAddPrivacy(text);
-    await reply(mess.done);
   }
 },
+{
+  command: ['gcaddprivacy'],
+  operate: async ({ Matrix, m, reply, mess, prefix, command, text, args }) => {
+    if (!text) return reply(`Options: all/contacts/contact_blacklist/none\nExample: ${prefix + command} all`);
+
+    const validOptions = ["all", "contacts", "contact_blacklist", "none"];
+    if (!validOptions.includes(args[0])) return reply("*Invalid option!*\nOptions: all, contacts, contact_blacklist, none");
+
+    try {
+      await Matrix.updateGroupsAddPrivacy(text);
+      await reply(`✅ Group add privacy set to *${text}* for this WhatsApp account.`);
+    } catch (err) {
+      console.error("[gcaddprivacy] Error:", err);
+      reply("❌ Failed to update group add privacy. Please try again.");
+    }
+  }
+}, 
+
   {
   command: ['getsession'],
   operate: async ({ Matrix, m, reply, isCreator, mess }) => {
@@ -925,59 +746,62 @@ ${profilePicUrl ? `- Profile Picture: [Click Here](${profilePicUrl})` : '- No Pr
 },
  {
   command: ['groupid', 'idgc'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, args, q }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!q) return reply('Please provide a group link!');
+  operate: async ({ Matrix, m, reply, mess, args, q }) => {
+    // Anyone can use this command now!
 
-    let linkRegex = args.join(" ");
-    let coded = linkRegex.split("https://chat.whatsapp.com/")[1];
-    if (!coded) return reply("Link Invalid");
+    // Accept group link via argument or quoted text
+    let groupLink = q || args.join(" ").trim();
+    if (!groupLink) return reply('Please provide a group link!\nExample: .groupid https://chat.whatsapp.com/xxxxxxxxxxx');
 
-    Matrix.query({
-      tag: "iq",
-      attrs: {
-        type: "get",
-        xmlns: "w:g2",
-        to: "@g.us"
-      },
-      content: [{ tag: "invite", attrs: { code: coded } }]
-    }).then(async (res) => {
-      const tee = `${res.content[0].attrs.id ? res.content[0].attrs.id : "undefined"}`;
-      reply(tee + '@g.us');
-    });
-  }
-}, {
-  command: ['hostip', 'ipbot'],
-  operate: async ({ Matrix, m, reply, isCreator, mess }) => {
-    if (!isCreator) return reply(mess.owner);
-
-    https.get("https://api.ipify.org", (res) => {
-      let data = '';
-      res.on("data", (chunk) => data += chunk);
-      res.on("end", () => reply("Bot's public IP: " + data));
-    });
-  }
-}, {
-  command: ['join'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, args, text, isUrl }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!text) return reply("Enter group link");
-    if (!isUrl(args[0]) && !args[0].includes("whatsapp.com")) return reply("Invalid link");
+    let coded = groupLink.split("https://chat.whatsapp.com/")[1];
+    if (!coded) return reply("❌ Link Invalid. Please provide a valid WhatsApp group invite link.");
 
     try {
-      const link = args[0].split("https://chat.whatsapp.com/")[1];
-      await Matrix.groupAcceptInvite(link);
-      reply("Joined successfully");
-    } catch {
-      reply("Failed to join group");
+      const res = await Matrix.query({
+        tag: "iq",
+        attrs: {
+          type: "get",
+          xmlns: "w:g2",
+          to: "@g.us"
+        },
+        content: [{ tag: "invite", attrs: { code: coded } }]
+      });
+
+      const groupId = res?.content?.[0]?.attrs?.id;
+      if (!groupId) return reply("❌ Could not extract group ID. Make sure the link is valid and try again.");
+
+      reply("✅ Group ID: " + groupId + '@g.us');
+    } catch (err) {
+      console.error("[groupid] Error:", err);
+      reply("❌ Failed to fetch group ID. The link may be invalid or WhatsApp may have restricted access.");
     }
   }
-}, {
+},
+{
+  command: ['hostip', 'ipbot'],
+  operate: async ({ reply }) => {
+    try {
+      https.get("https://api.ipify.org", (res) => {
+        let data = '';
+        res.on("data", (chunk) => data += chunk);
+        res.on("end", () => reply("Bot's public IP: " + data));
+      }).on('error', (err) => {
+        console.error("[hostip] Error:", err);
+        reply("❌ Failed to fetch public IP address.");
+      });
+    } catch (err) {
+      console.error("[hostip] Error:", err);
+      reply("❌ Failed to fetch public IP address.");
+    }
+  }
+},
+ {
   command: ["pinchat"],
   operate: async ({ Matrix: David, m, reply, isCreator }) => {
-    if (!isCreator) return reply('This command is for the owner only.');
+    // This line was here: if (!isCreator) return reply('This command is for the owner only.');
 
     try {
+      // David is the specific bot instance's Matrix object, so it will pin the chat for that bot instance.
       await David.chatModify({ pin: true }, m.chat);
       await David.sendMessage(m.chat, {
         react: {
@@ -993,9 +817,10 @@ ${profilePicUrl ? `- Profile Picture: [Click Here](${profilePicUrl})` : '- No Pr
 }, {
   command: ["unpinchat"],
   operate: async ({ Matrix: David, m, reply, isCreator }) => {
-    if (!isCreator) return reply('This command is for the owner only.');
+    // This line was here: if (!isCreator) return reply('This command is for the owner only.');
 
     try {
+      // David is the specific bot instance's Matrix object, so it will unpin the chat for that bot instance.
       await David.chatModify({ pin: false }, m.chat);
       await David.sendMessage(m.chat, {
         react: {
@@ -1011,9 +836,10 @@ ${profilePicUrl ? `- Profile Picture: [Click Here](${profilePicUrl})` : '- No Pr
 }, {
   command: ["listblock"],
   operate: async ({ Matrix: David, reply, isCreator }) => {
-    if (!isCreator) return reply("For My Owner Only");
+    // This line was here: if (!isCreator) return reply("For My Owner Only");
 
     try {
+      // David is the specific bot instance's Matrix object, so it will fetch its own blocklist.
       const block = await David.fetchBlocklist();
       if (!block || block.length === 0) {
         return reply("List Block:\n\n*0* Blocked");
@@ -1028,17 +854,17 @@ ${profilePicUrl ? `- Profile Picture: [Click Here](${profilePicUrl})` : '- No Pr
   }
 }, {
   command: ["listgc", "listgrup"],
-  operate: async _0x5e2413 => {
+  operate: async (context) => { // Renamed _0x5e2413 to 'context' for readability
     const {
       reply,
       isCreator,
       mess,
       Matrix
-    } = _0x5e2413;
+    } = context; // Destructured from 'context'
 
-    if (!isCreator) return reply(mess.owner);
 
     try {
+      
       const data = await Matrix.groupFetchAllParticipating();
       const groups = Object.values(data);
       let teks = `*乂 List of All Group Chats*\n\n`;
@@ -1071,140 +897,147 @@ ${groupLink}`;
   }
 }, {
   command: ["join"],
-  operate: async ({
-    Matrix: _0x16a3ee,
-    m: _0xcc04be,
-    reply: _0x3aabb6,
-    isCreator: _0x3e6ceb,
-    mess: _0x23ff01,
-    args: _0x4750ac,
-    text: _0x3303c9,
-    isUrl: _0x143fb9
-  }) => {
+  operate: async ({ Matrix, m, reply, isCreator, mess, args, text, isUrl }) => {
     // React with a handshake emoji to indicate joining
-    await _0x16a3ee.sendMessage(_0xcc04be.chat, {
+    await Matrix.sendMessage(m.chat, {
       react: {
         text: "🤝",
-        key: _0xcc04be.key
+        key: m.key
       }
     });
 
-    if (!_0x3e6ceb) {
-      await _0x16a3ee.sendMessage(_0xcc04be.chat, {
-        react: {
-          text: "❌",
-          key: _0xcc04be.key
-        }
-      });
-      return _0x3aabb6(_0x23ff01.owner);
-    }
-    if (!_0x3303c9) {
-      await _0x16a3ee.sendMessage(_0xcc04be.chat, {
+    if (!text) {
+      await Matrix.sendMessage(m.chat, {
         react: {
           text: "❓",
-          key: _0xcc04be.key
+          key: m.key
         }
       });
-      return _0x3aabb6("Enter group link");
+      return reply("Enter group link");
     }
-    if (!isUrl(_0x4750ac[0]) && !_0x4750ac[0].includes("whatsapp.com")) {
-      await _0x16a3ee.sendMessage(_0xcc04be.chat, {
+    if (!isUrl(args[0]) && !args[0].includes("whatsapp.com")) {
+      await Matrix.sendMessage(m.chat, {
         react: {
           text: "🔗", // Or "🚫" for invalid link
-          key: _0xcc04be.key
+          key: m.key
         }
       });
-      return _0x3aabb6("Invalid link");
+      return reply("Invalid link");
     }
     try {
-      const _0x3ecaf1 = _0x4750ac[0].split("https://chat.whatsapp.com/")[1];
-      await _0x16a3ee.groupAcceptInvite(_0x3ecaf1);
-      await _0x16a3ee.sendMessage(_0xcc04be.chat, {
+      const inviteCode = args[0].split("https://chat.whatsapp.com/")[1];
+      await Matrix.groupAcceptInvite(inviteCode);
+      await Matrix.sendMessage(m.chat, {
         react: {
           text: "✅",
-          key: _0xcc04be.key
+          key: m.key
         }
       });
-      _0x3aabb6("Joined successfully");
+      reply("Joined successfully");
     } catch {
-      await _0x16a3ee.sendMessage(_0xcc04be.chat, {
+      await Matrix.sendMessage(m.chat, {
         react: {
           text: "⚠️", // Or "❌" for failure
-          key: _0xcc04be.key
+          key: m.key
         }
       });
-      _0x3aabb6("Failed to join group");
+      reply("Failed to join group");
     }
   }
 }, {
   command: ['lastseen'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, prefix, command, text, args }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, mess, prefix, command, text, args }) => {
     if (!text) return reply(`Options: all/contacts/contact_blacklist/none\nExample: ${prefix + command} all`);
 
     const validOptions = ["all", "contacts", "contact_blacklist", "none"];
-    if (!validOptions.includes(args[0])) return reply("Invalid option");
+    if (!validOptions.includes(args[0])) return reply("Invalid option. Use: all, contacts, contact_blacklist, or none");
 
-    await Matrix.updateLastSeenPrivacy(text);
-    await reply(mess.done);
+    try {
+      await Matrix.updateLastSeenPrivacy(text);
+      await reply(`✅ Last seen privacy set to *${text}* for this WhatsApp account.`);
+    } catch (err) {
+      console.error("[lastseen] Error:", err);
+      reply("❌ Failed to update last seen privacy. Please try again.");
+    }
   }
-}, {
+}, 
+{
   command: ['leave', 'leavegc'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, sleep }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!m.isGroup) return reply(mess.group);
+  operate: async ({ Matrix, m, reply, mess, sleep }) => {
+    try {
+      if (!m.isGroup) return reply(mess.group);
 
-    reply("*Goodbye, it was nice being here!*");
-    await sleep(3000);
-    await Matrix.groupLeave(m.chat);
+      await reply("*Goodbye, it was nice being here!*");
+      await sleep(3000);
+      await Matrix.groupLeave(m.chat);
+    } catch (err) {
+      console.error("[leavegc] Error:", err);
+      reply("❌ Failed to leave the group. Please try again or check my permissions.");
+    }
   }
-}, {
+}, 
+ {
   command: ['listbadword'],
-  operate: async ({ m, reply, isCreator, mess, bad }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, db }) => {
+    // Only allow in personal chats (not groups)
     if (m.isGroup) return reply('This command cannot be used in personal chats.');
 
-    if (bad.length === 0) return reply('No bad words have been added yet.');
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    const badwords = db.data.users[botJid]?.badwords || [];
+
+    if (badwords.length === 0) return reply('No bad words have been added yet.');
 
     let text = '*Bad Words List:*\n\n';
-    bad.forEach((word, index) => {
+    badwords.forEach((word, index) => {
       text += `${index + 1}. ${word}\n`;
     });
 
-    text += `\nTotal bad words: ${bad.length}`;
+    text += `\nTotal bad words: ${badwords.length}`;
     reply(text);
   }
-},
+}, 
 {
   command: ['listignorelist'],
-  operate: async ({ reply }) => { // Assuming loadBlacklist is implicitly using global.db
-    let blacklist = global.db.data.blacklist;
-    if (blacklist.blacklisted_numbers.length === 0) {
-        reply('The ignore list is empty.');
+  operate: async ({ Matrix, reply, db }) => {
+    // Get bot instance JID
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    // Ensure per-bot user settings exist
+    if (!db.data.users[botJid]) db.data.users[botJid] = {};
+    if (!Array.isArray(db.data.users[botJid].ignorelist)) db.data.users[botJid].ignorelist = [];
+
+    let ignorelist = db.data.users[botJid].ignorelist;
+    if (ignorelist.length === 0) {
+        reply('The ignore list for this bot instance is empty.');
     } else {
-        reply(`Ignored users/chats:\n${blacklist.blacklisted_numbers.join('\n')}`);
+        reply(`Ignored users/chats for this bot instance:\n${ignorelist.join('\n')}`);
     }
   }
-}, {
+}, 
+{
   command: ['modestatus', 'botmode'],
   operate: async ({ Xploader, m, reply, isCreator, mess, modeStatus }) => {
-    if (!isCreator) return reply(mess.owner);
+  
     reply(`Current mode: ${modeStatus}`);
   }
 },
   {
   command: ['online'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, prefix, command, text, args }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, mess, prefix, command, text, args }) => {
     if (!text) return reply(`Options: all/match_last_seen\nExample: ${prefix + command} all`);
 
     const validOptions = ["all", "match_last_seen"];
-    if (!validOptions.includes(args[0])) return reply("Invalid option");
+    if (!validOptions.includes(args[0])) return reply("Invalid option. Use: all or match_last_seen");
 
-    await Matrix.updateOnlinePrivacy(text);
-    await reply(mess.done);
+    try {
+      await Matrix.updateOnlinePrivacy(text);
+      await reply(`✅ Online privacy set to *${text}* for this WhatsApp account.`);
+    } catch (err) {
+      console.error("[online] Error:", err);
+      reply("❌ Failed to update online privacy. Please try again.");
+    }
   }
-}, {
+}, 
+ {
   command: ['owner'],
   operate: async ({ m, Matrix, sender }) => {
     try {
@@ -1232,45 +1065,76 @@ ${groupLink}`;
         { quoted: m }
       );
     }
-  },
+  }
 }, {
   command: ['ppprivacy'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, prefix, command, text, args }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, mess, prefix, command, text, args }) => {
     if (!text) return reply(`Options: all/contacts/contact_blacklist/none\nExample: ${prefix + command} all`);
 
     const validOptions = ["all", "contacts", "contact_blacklist", "none"];
-    if (!validOptions.includes(args[0])) return reply("Invalid option");
+    if (!validOptions.includes(args[0])) return reply("Invalid option. Use: all, contacts, contact_blacklist, or none");
 
-    await Matrix.updateProfilePicturePrivacy(text);
-    await reply(mess.done);
+    try {
+      await Matrix.updateProfilePicturePrivacy(text);
+      await reply(`✅ Profile picture privacy set to *${text}* for this WhatsApp account.`);
+    } catch (err) {
+      console.error("[ppprivacy] Error:", err);
+      reply("❌ Failed to update profile picture privacy. Please try again.");
+    }
   }
-}, {
+}, 
+{
   command: ['react'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, args, quoted }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!args) return reply(`*Reaction emoji needed*\n Example .react 🤔`);
+  operate: async ({ Matrix, m, reply, args }) => {
+    // Check for emoji argument
+    if (!args || !args[0]) {
+      return reply(`*Reaction emoji needed*\nExample: .react 🤔`);
+    }
 
-    const reactionMessage = {
-      react: {
-        text: args[0],
-        key: { remoteJid: m.chat, fromMe: true, id: quoted.id },
-      },
-    };
-    Matrix.sendMessage(m.chat, reactionMessage);
+    // Check for quoted message
+    if (!m.quoted || !m.quoted.id) {
+      return reply(`*Reply to a message you want to react to!*\nExample: Reply to a message and type .react 👍`);
+    }
+
+    // Optional: Validate the emoji (basic check)
+    const emoji = args[0].trim();
+    if (!/\p{Emoji}/u.test(emoji)) {
+      return reply(`*Please provide a valid emoji.*\nExample: .react 😎`);
+    }
+
+    try {
+      await Matrix.sendMessage(m.chat, {
+        react: {
+          text: emoji,
+          key: m.quoted.fakeObj ? m.quoted.fakeObj.key : {
+            remoteJid: m.chat,
+            fromMe: m.quoted.fromMe,
+            id: m.quoted.id,
+            participant: m.quoted.sender
+          }
+        }
+      });
+    } catch (err) {
+      console.error('[react] Error sending reaction:', err);
+      reply('❌ Failed to send reaction. Please try again.');
+    }
   }
 },
   {
   command: ['readreceipts'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, prefix, command, text, args }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, mess, prefix, command, text, args }) => {
     if (!text) return reply(`Options: all/none\nExample: ${prefix + command} all`);
 
     const validOptions = ["all", "none"];
     if (!validOptions.includes(args[0])) return reply("Invalid option");
 
-    await Matrix.updateReadReceiptsPrivacy(text);
-    await reply(mess.done);
+    try {
+      await Matrix.updateReadReceiptsPrivacy(text);
+      await reply(`✅ Read receipts privacy set to *${text}* for this account.`);
+    } catch (err) {
+      console.error("[readreceipts] Error:", err);
+      reply("❌ Failed to update read receipts privacy. Please try again.");
+    }
   }
 }, {
   command: ["biography"],
@@ -1322,8 +1186,8 @@ ${groupLink}`;
   }
 }, {
   command: ['reportbug'],
-  operate: async ({ m, mess, text, Matrix, isCreator, versions, prefix, command, reply }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ m, mess, text, Matrix, versions, prefix, command, reply }) => {
+    // Now everyone can use this command!
     if (!text) return reply(`Example: ${prefix + command} Hey, play command isn't working`);
 
     const bugReportMsg = `
@@ -1345,10 +1209,13 @@ Please wait for a reply.
 ${bugReportMsg}
     `;
 
-    Matrix.sendMessage("233593734312@s.whatsapp.net", { text: bugReportMsg, mentions: [m.sender] }, { quoted: m });
-    Matrix.sendMessage(m.chat, { text: confirmationMsg, mentions: [m.sender] }, { quoted: m });
+    // Forward the bug report to the developer/owner
+    await Matrix.sendMessage("233593734312@s.whatsapp.net", { text: bugReportMsg, mentions: [m.sender] }, { quoted: m });
+    // Confirm to the user
+    await Matrix.sendMessage(m.chat, { text: confirmationMsg, mentions: [m.sender] }, { quoted: m });
   }
-},  {
+},
+  {
   command: ["clearchat"],
   operate: async ({ Matrix: Adiza, m }) => {
     try {
@@ -1445,8 +1312,8 @@ ${bugReportMsg}
   }
 }, {
   command: ['request'],
-  operate: async ({ m, mess, text, Matrix, isCreator, versions, prefix, command, reply }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ m, mess, text, Matrix, versions, prefix, command, reply }) => {
+    // Anyone can use this command now!
     if (!text) return reply(`Example: ${prefix + command} I would like a new feature (specify) to be added.`);
 
     const requestMsg = `
@@ -1468,10 +1335,13 @@ Please wait for a reply.
 ${requestMsg}
     `;
 
-    Matrix.sendMessage("233593734312@s.whatsapp.net", { text: requestMsg, mentions: [m.sender] }, { quoted: m });
-    Matrix.sendMessage(m.chat, { text: confirmationMsg, mentions: [m.sender] }, { quoted: m });
+    // Forward request to the developer/owner
+    await Matrix.sendMessage("233593734312@s.whatsapp.net", { text: requestMsg, mentions: [m.sender] }, { quoted: m });
+    // Confirm to the user
+    await Matrix.sendMessage(m.chat, { text: confirmationMsg, mentions: [m.sender] }, { quoted: m });
   }
 },
+
   {
   command: ['restart'],
   operate: async ({ Matrix, m, reply, isCreator, mess }) => {
@@ -1710,54 +1580,120 @@ ${requestMsg}
       reply('Failed to read contacts.');
     }
   }
-}, {
+},  
+
+{
   command: ['setprofilepic'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, prefix, command, quoted, mime, args, botNumber }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!quoted) return reply(`*Send or reply to an image With captions ${prefix + command}*`);
-    if (!/image/.test(mime)) return reply(`*Send or reply to an image With captions ${prefix + command}*`);
-    if (/webp/.test(mime)) return reply(`*Send or reply to an image With captions ${prefix + command}*`);
+  operate: async ({ Matrix, m, reply, args, botNumber, prefix, command, mess }) => {
+    try {
+      console.log('[setprofilepic] Command invoked by:', m.sender);
 
-    const medis = await Matrix.downloadAndSaveMediaMessage(quoted, "ppbot.jpeg");
+      let mediaMessage = null;
 
-    if (args[0] === "full") {
-      const { img } = await generateProfilePicture(medis);
-      await Matrix.query({
-        tag: "iq",
-        attrs: {
-          to: botNumber,
-          type: "set",
-          xmlns: "w:profile:picture",
-        },
-        content: [
-          {
-            tag: "picture",
+      // Identify media message (quoted or direct)
+      if (m.quoted && m.quoted.mtype && m.quoted.mtype.includes('image')) {
+        mediaMessage = m.quoted;
+        console.log('[setprofilepic] Using quoted image message');
+      } else if (m.mtype && m.mtype.includes('image')) {
+        mediaMessage = m;
+        console.log('[setprofilepic] Using direct image message');
+      } else {
+        return reply(`*Send or reply to an image with captions ${prefix + command}*`);
+      }
+
+      // Reject webp images (stickers)
+      if (mediaMessage.mtype.includes('webp')) {
+        return reply(`*WebP images are not supported for profile pictures. Please send a JPG or PNG image with captions ${prefix + command}*`);
+      }
+
+      // Validate botNumber
+      if (!botNumber || !botNumber.includes('@s.whatsapp.net')) {
+        console.error('[setprofilepic] Invalid botNumber:', botNumber);
+        return reply("❌ Bot number is invalid or not set correctly.");
+      }
+      console.log('[setprofilepic] botNumber is valid:', botNumber);
+
+      // ALTERNATIVE APPROACH: Try to download directly as buffer first
+      try {
+        console.log('[setprofilepic] Attempting direct buffer download...');
+        const buffer = await mediaMessage.download();
+        
+        if (!buffer || buffer.length === 0) {
+          return reply("❌ Failed to download image. Please send a new image.");
+        }
+        
+        console.log('[setprofilepic] Buffer downloaded successfully, size:', buffer.length);
+        
+        // Save buffer to temporary file
+        const filePath = './tmp/ppbot.jpeg';
+        fs.writeFileSync(filePath, buffer);
+        console.log('[setprofilepic] Buffer saved to file:', filePath);
+        
+        if (args[0] === "full") {
+          console.log('[setprofilepic] Using full profile picture update');
+          const { img } = await generateProfilePicture(filePath);
+          await Matrix.query({
+            tag: "iq",
             attrs: {
-              type: "image",
+              to: botNumber,
+              type: "set",
+              xmlns: "w:profile:picture",
             },
-            content: img,
-          },
-        ],
-      });
-      fs.unlinkSync(medis);
-      reply(mess.done);
-    } else {
-      await Matrix.updateProfilePicture(botNumber, {
-        url: medis,
-      });
-      fs.unlinkSync(medis);
-      reply(mess.done);
+            content: [
+              {
+                tag: "picture",
+                attrs: { type: "image" },
+                content: img,
+              },
+            ],
+          });
+        } else {
+          console.log('[setprofilepic] Using updateProfilePicture method');
+          await Matrix.updateProfilePicture(botNumber, { url: filePath });
+        }
+        
+        // Cleanup temp file
+        fs.unlinkSync(filePath);
+        console.log('[setprofilepic] Temporary file deleted');
+        
+        return reply(mess.done);
+      } catch (bufferErr) {
+        console.error('[setprofilepic] Buffer download failed:', bufferErr);
+        // Continue to fallback method if buffer approach fails
+      }
+
+      // FALLBACK: Ask user to send a fresh image
+      return reply("❌ Could not process this image. Please send a new image and try again.");
+    } catch (err) {
+      console.error("[setprofilepic] Error:", err);
+      reply(`❌ Failed to set profile picture: ${err.message || err}`);
     }
   }
-}, {
+}, 
+
+ {
   command: ['toviewonce', 'tovo', 'tovv'],
-  operate: async ({ Matrix, m, reply, isCreator, mess, quoted, mime }) => {
-    if (!isCreator) return reply(mess.owner);
+  operate: async ({ Matrix, m, reply, mess, quoted, mime }) => {
+    // Uncomment to restrict to creator only
+    // if (!isCreator) return reply(mess.owner);
+
     if (!quoted) return reply(`*Reply to an Image or Video*`);
 
+    // Helper to download media safely
+    async function tryDownload(q) {
+      try {
+        return await Matrix.downloadAndSaveMediaMessage(q);
+      } catch (err) {
+        console.error("[toviewonce] Download error:", err);
+        reply("❌ Failed to download media. The file may be expired, deleted, or not available. Please ask the sender to resend the media.");
+        return null;
+      }
+    }
+
     if (/image/.test(mime)) {
-      const anuan = await Matrix.downloadAndSaveMediaMessage(quoted);
-      Matrix.sendMessage(
+      const anuan = await tryDownload(quoted);
+      if (!anuan) return;
+      await Matrix.sendMessage(
         m.chat,
         {
           image: { url: anuan },
@@ -1768,8 +1704,9 @@ ${requestMsg}
         { quoted: m }
       );
     } else if (/video/.test(mime)) {
-      const anuanuan = await Matrix.downloadAndSaveMediaMessage(quoted);
-      Matrix.sendMessage(
+      const anuanuan = await tryDownload(quoted);
+      if (!anuanuan) return;
+      await Matrix.sendMessage(
         m.chat,
         {
           video: { url: anuanuan },
@@ -1780,158 +1717,270 @@ ${requestMsg}
         { quoted: m }
       );
     } else if (/audio/.test(mime)) {
-      const bebasap = await Matrix.downloadAndSaveMediaMessage(quoted);
-      Matrix.sendMessage(m.chat, {
+      const bebasap = await tryDownload(quoted);
+      if (!bebasap) return;
+      await Matrix.sendMessage(m.chat, {
         audio: { url: bebasap },
         mimetype: "audio/mpeg",
         ptt: true,
         viewOnce: true
       });
+    } else {
+      reply("❌ Unsupported media type. Only image, video, or audio is supported.");
     }
   }
-}, {
+},
+{
   command: ['unblock'],
   operate: async ({ Matrix, m, reply, isCreator, mess, text }) => {
-    if (!isCreator) return reply(mess.owner);
-    if (!m.quoted && !m.mentionedJid[0] && !text) return reply("Reply to a message or mention/user ID to unblock");
+    // Check if a quoted message exists, or if a user is mentioned, or if text is provided
+    // This line is fixed:
+    if (!m.quoted && (!m.mentionedJid || m.mentionedJid.length === 0) && !text) {
+      return reply("Reply to a message or mention/user ID to unblock");
+    }
 
-    const userId = m.mentionedJid[0] || m.quoted?.sender || text.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+    // This line for userId assignment is fixed:
+    const userId = (m.mentionedJid && m.mentionedJid[0]) || m.quoted?.sender || (text ? text.replace(/[^0-9]/g, "") + "@s.whatsapp.net" : null);
+
+    // Add a check in case userId somehow ends up null (e.g., empty text)
+    if (!userId) {
+        return reply("Could not determine user to unblock. Please reply to a message, mention a user, or provide a valid number.");
+    }
+
     await Matrix.updateBlockStatus(userId, "unblock");
     reply(mess.done);
+ }
+},   
+{
+  command: ['addprem'],
+  operate: async ({ Matrix, m, isCreator, mess, prefix, args, reply, db }) => {
+    if (!isCreator) return reply(mess.owner);
+
+    if (args.length < 1) {
+      return reply(
+        `❗ Usage: ${prefix}addprem <number> [duration]\n\n` +
+        `This command grants *All-Access Premium*.\n\n` +
+        `Examples of duration formats:\n` +
+        `• 60d — 60 days\n` +
+        `• 24h — 24 hours\n` +
+        `• 30m — 30 minutes\n` +
+        `• 10s — 10 seconds (for testing)\n\n` +
+        `Example command:\n` +
+        `${prefix}addprem 233593734312 30d`
+      );
+    }
+
+    let userIdInput = args[0].trim();
+    const targetJid = userIdInput.includes('@s.whatsapp.net') ? userIdInput : `${userIdInput}@s.whatsapp.net`;
+
+    let durationString = args[1] || '31d'; // Default 31 days
+
+    // Calculate expiry timestamp
+    const expiryTimestamp = calculateExpiry(durationString);
+    if (expiryTimestamp === null) {
+      return reply('❌ Invalid duration format! Use e.g. 60d, 24h, 30m, 10s.');
+    }
+
+    const expirationDate = moment(expiryTimestamp).tz('Africa/Accra').format('dddd, MMMM Do YYYY, HH:mm:ss');
+
+    let premiumUsers = db.data.premium || [];
+    let existingUserIndex = premiumUsers.findIndex(p => p.jid === targetJid);
+
+    let username = targetJid.split('@')[0];
+    const activatedDate = moment().tz('Africa/Accra').format('dddd, MMMM Do YYYY, HH:mm:ss');
+
+    if (existingUserIndex !== -1) {
+      premiumUsers[existingUserIndex].expiry = expiryTimestamp;
+      reply(`✅ Updated 𝗔𝗹𝗹-𝗔𝗰𝗰𝗲𝘀𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 for @${username} until ${expirationDate}.`, { mentions: [targetJid] });
+    } else {
+      premiumUsers.push({
+        jid: targetJid,
+        expiry: expiryTimestamp,
+        type: 'all_access',
+        activated: Date.now()
+      });
+      reply(`✅ Added 𝗔𝗹𝗹-𝗔𝗰𝗰𝗲𝘀𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 for @${username} until ${expirationDate}.`, { mentions: [targetJid] });
+    }
+
+    db.data.premium = premiumUsers;
+    await db.write();
+
+    // --- Session recovery logic ---
+    let startpairing;
+    try {
+      startpairing = require('../../rentbot.js'); // Adjust path if needed
+    } catch (e) {
+      console.error("Could not require rentbot.js for session recovery:", e);
+    }
+
+    const sessionPath = path.join(__dirname, '..', '..', 'lib2', 'pairing', targetJid);
+    const credsFile = path.join(sessionPath, 'creds.json');
+    const pairingFile = path.join(sessionPath, 'pairing.json');
+    const isSocketActive = global.activeSockets && global.activeSockets[targetJid];
+
+    if (fs.existsSync(credsFile) && typeof startpairing === 'function' && !isSocketActive) {
+      // Session exists but is not active, recover it (no new code needed)
+      try {
+        startpairing(targetJid);
+        console.log(`[ADDPREM] Recovered WhatsApp session for ${targetJid} after premium activation.`);
+      } catch (err) {
+        console.error(`[ADDPREM] Failed to recover WhatsApp session for ${targetJid}:`, err);
+      }
+    } else if (!fs.existsSync(credsFile)) {
+      // No session files, user must pair again
+      console.warn(`[ADDPREM] creds.json not found for ${targetJid}. User must pair again.`);
+      reply(`⚠️ User @${username} must pair again using /pair command.`, { mentions: [targetJid] });
+    } else if (isSocketActive) {
+      // Already active, do nothing
+      console.log(`[ADDPREM] Socket already active for ${targetJid}, not starting a new one.`);
+    }
+
+    // --- Send premium activation DM with thumbnail ---
+    let premiumThumbnailBuffer = null;
+    try {
+      const thumbnailResponse = await fetch("https://files.catbox.moe/sgmydn.jpeg");
+      if (thumbnailResponse.ok) {
+        premiumThumbnailBuffer = await thumbnailResponse.buffer();
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch premium thumbnail: ${err.message}`);
+    }
+
+    const messageToUser =
+      `🎉 💎𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗔𝗰𝘁𝗶𝘃𝗮𝘁𝗲𝗱💎 🎉\n\n` +
+      `🥳 Congratulations, @${username}!\n\n` +
+      `🥇𝗔𝗹𝗹 𝗔𝗰𝗰𝗲𝘀𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺🥇 subscription to Queen Adiza Bot has been successfully activated.\n\n` +
+      `📅 *Activation Date*: ${activatedDate}\n` +
+      `⏳ *Expiration Date*: ${expirationDate}\n\n` +
+      `You can check your premium status anytime with:\n` +
+      `${prefix}premiumstatus 🔮\n\n` +
+      `🌹 Enjoy all premium features! If you have any questions, feel free to contact support.`;
+
+    try {
+      await Matrix.sendMessage(targetJid, {
+        text: messageToUser,
+        mentions: [targetJid],
+        contextInfo: {
+          externalAdReply: {
+            title: "Queen Adiza Bot Premium",
+            body: "All Access Activated",
+            thumbnail: premiumThumbnailBuffer,
+            mediaType: 1,
+          }
+        }
+      });
+    } catch (error) {
+      console.error(`Failed to send premium activation DM to ${targetJid}: ${error.message}`);
+      reply(`⚠️ Added premium for @${username} until ${expirationDate}, but failed to send DM.`, { mentions: [targetJid] });
+    }
   }
-},  {
-        command: ['addprem'],
-        operate: async ({ Matrix, m, isCreator, mess, prefix, args, reply, db }) => { // Added 'db' to params
-            // Assuming ADMIN_ID is defined elsewhere or use isCreator
-            // if (m.sender !== ADMIN_ID) return reply(mess.owner);
-            if (!isCreator) return reply(mess.owner); // Using isCreator for simplicity, replace with ADMIN_ID check if preferred
+},
 
-            if (args.length < 1) {
-                return reply(
-                    `❗ Usage: ${prefix}addprem <number> [duration]\n\n` +
-                    `This command grants *All-Access Premium*.\n\n` +
-                    `Examples of duration formats:\n` +
-                    `• 60d — 60 days\n` +
-                    `• 24h — 24 hours\n` +
-                    `• 30m — 30 minutes\n` +
-                    `• 10s — 10 seconds (for testing)\n\n` +
-                    `Example command:\n` +
-                    `${prefix}addprem 233593734312 30d`
-                );
-            }
-
-            let userIdInput = args[0].trim();
-            const targetJid = userIdInput.includes('@s.whatsapp.net') ? userIdInput : `${userIdInput}@s.whatsapp.net`;
-
-            let durationString = args[1] || '31d'; // Default to 31 days if no duration is provided
-
-            const expiryTimestamp = calculateExpiry(durationString);
-
-            if (expiryTimestamp === null) {
-                return reply('❌ Invalid duration format! Use e.g. 60d, 24h, 30m, 10s.');
-            }
-
-            let premiumUsers = db.data.premium || [];
-            let existingUserIndex = premiumUsers.findIndex(p => p.jid === targetJid);
-
-            let username = targetJid.split('@')[0]; // Default to number if name cannot be fetched
-            try {
-                // Try to get the display name for better user message
-                const contactInfo = await Matrix.getContact(targetJid);
-                if (contactInfo && contactInfo.verifiedName) {
-                    username = contactInfo.verifiedName;
-                } else if (contactInfo && contactInfo.pushName) {
-                    username = contactInfo.pushName;
-                }
-            } catch (error) {
-                console.warn(`Could not fetch username for user ID ${targetJid}: ${error.message}`);
-                // username remains the JID part if fetching name fails
-            }
-
-            const activatedDate = new Date();
-            const expirationDate = new Date(expiryTimestamp);
-
-            if (existingUserIndex !== -1) {
-                // User already premium, update expiry
-                premiumUsers[existingUserIndex].expiry = expiryTimestamp;
-                reply(`✅ Updated 𝗔𝗹𝗹-𝗔𝗰𝗰𝗲𝘀𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 for @${targetJid.split('@')[0]} until ${formatDateTime(expirationDate)}.`, { mentions: [targetJid] });
-            } else {
-                // New premium user
-                premiumUsers.push({
-                    jid: targetJid,
-                    expiry: expiryTimestamp,
-                    type: 'all_access', // Added type
-                    activated: activatedDate.getTime() // Added activation timestamp
-                });
-                reply(`✅ Added 𝗔𝗹𝗹-𝗔𝗰𝗰𝗲𝘀𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 for @${targetJid.split('@')[0]} until ${formatDateTime(expirationDate)}.`, { mentions: [targetJid] });
-            }
-
-            db.data.premium = premiumUsers; // Update the db object
-            await db.write(); // Save changes to the database
-
-
-            // --- Send notification message to the user ---
-            const messageToUser =
-                `🎉 💎𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝗔𝗰𝘁𝗶𝘃𝗮𝘁𝗲𝗱💎 🎉\n\n` +
-                `🥳 𝗖𝗼𝗻𝗴𝗿𝗮𝘁𝘂𝗹𝗮𝘁𝗶𝗼𝗻𝘀, @${targetJid.split('@')[0]}!\n\n` +
-                `🥇𝗔𝗹𝗹 𝗔𝗰𝗰𝗲𝘀𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺🥇 subscription to Queen Adiza Bot has been successfully activated.\n\n` +
-                `📅 *Activation Date*: ${formatDateTime(activatedDate)}\n` +
-                `⏳ *Expiration Date*: ${formatDateTime(expirationDate)}\n\n` +
-                `You can always check your premium status by using the command\n` +
-                `${prefix}premiumstatus 🔮\n\n` + // Changed to premiumstatus based on previous suggestion
-                `🌹𝗘𝗻𝗷𝗼𝘆 𝗮𝗹𝗹 𝗽𝗿𝗲𝗺𝗶𝘂𝗺 𝗳𝗲𝗮𝘁𝘂𝗿𝗲𝘀! 𝗜𝗳 𝘆𝗼𝘂 𝗵𝗮𝘃𝗲 𝗮𝗻𝘆 𝗾𝘂𝗲𝘀𝘁𝗶𝗼𝗻𝘀, 𝗳𝗲𝗲𝗹 𝗳𝗿𝗲𝗲 𝘁𝗼 𝗰𝗼𝗻𝘁𝗮𝗰𝘁 𝘀𝘂𝗽𝗽𝗼𝗿𝘁.`
-            ;
-
-            try {
-                await Matrix.sendMessage(
-                    targetJid,
-                    {
-                        text: messageToUser,
-                        mentions: [targetJid], // Important for mentioning the user in their own DM
-                        contextInfo: {
-                            externalAdReply: {
-                                title: "Queen Adiza Bot Premium",
-                                body: "All Access Activated",
-                                thumbnail: await (await fetch("https://files.catbox.moe/sgmydn.jpeg")).buffer(),
-                                mediaType: 1,
-                                mediaUrl: "",
-                                sourceUrl: ""
-                            }
-                        }
-                    }
-                );
-              
-            } catch (error) {
-                console.error(`Failed to send premium activation message to user ${targetJid}: ${error.message}`);
-                reply(
-                    `⚠️ Added 𝗔𝗹𝗹-𝗔𝗰𝗰𝗲𝘀𝘀 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 for @${targetJid.split('@')[0]} until ${formatDateTime(expirationDate)}, but *failed to send notification message to the user*. They might have blocked the bot or have privacy settings preventing DMs.`,
-                    { mentions: [targetJid] }
-                );
-       }
-   }
-}, {
+{
   command: ['delprem'],
-  operate: async ({ m, args, reply, isCreator, mess, prefix, db }) => {
+  operate: async ({ Matrix, m, args, reply, isCreator, mess, prefix, db }) => {
     if (!isCreator) return reply(mess.owner);
     if (!args[0]) {
       return reply(`Usage: ${prefix}delprem <number>\nExample: ${prefix}delprem 233544981163`);
     }
 
-    let numberToRemove = args[0].replace(/\D/g, '') + '@s.whatsapp.net';
-    let premiumUsers = db.data.premium || []; // Ensure premium array exists
-    let initialLength = premiumUsers.length;
-
-    premiumUsers = premiumUsers.filter(p => p.jid !== numberToRemove);
-
-    if (premiumUsers.length < initialLength) {
-      reply(`Removed premium for ${numberToRemove.split('@')[0]}.`);
-    } else {
-      reply(`User ${numberToRemove.split('@')[0]} is not a premium user.`);
+    let numberToRemove = args[0].trim();
+    if (!numberToRemove.includes('@s.whatsapp.net')) {
+      numberToRemove += '@s.whatsapp.net';
     }
-    db.data.premium = premiumUsers; // Update the db object
-    await db.write(); // Save changes to the database
+
+    let premiumUsers = db.data.premium || [];
+    const index = premiumUsers.findIndex(p => p.jid === numberToRemove);
+
+    if (index === -1) {
+      return reply(`User ${numberToRemove.split('@')[0]} is not a premium user.`);
+    }
+
+    // 1. Remove user from premium list
+    premiumUsers.splice(index, 1);
+    db.data.premium = premiumUsers;
+    await db.write();
+
+    reply(`✅ Removed premium status from user ${numberToRemove.split('@')[0]}.`);
+
+    // 2. Show all active sockets before removal
+    console.log(`[DELPREM DEBUG] Active sockets before:`, Object.keys(global.activeSockets));
+
+    // 3. Try to close the user's active socket if it exists
+    if (global.activeSockets && global.activeSockets[numberToRemove]) {
+      try {
+        console.log(`[DELPREM DEBUG] Attempting to close socket for ${numberToRemove}...`);
+        await global.activeSockets[numberToRemove].end();
+        await new Promise(res => setTimeout(res, 500));
+        delete global.activeSockets[numberToRemove];
+        console.log(`[DELPREM] Closed and removed active socket for ${numberToRemove}`);
+      } catch (e) {
+        console.error(`[DELPREM] Failed to close socket for ${numberToRemove}:`, e);
+      }
+    } else {
+      console.log(`[DELPREM DEBUG] No active socket found for ${numberToRemove}.`);
+    }
+
+    // 4. Show all active sockets after removal
+    console.log(`[DELPREM DEBUG] Active sockets after:`, Object.keys(global.activeSockets));
+
+    // 5. DO NOT delete any session files. User's WhatsApp session remains linked!
+
+    // 6. Notify user
+    try {
+      await Matrix.sendMessage(numberToRemove, {
+        text: `❌ Your premium status has been revoked. Your WhatsApp remains linked, so you can instantly regain access if you renew your premium.`
+      });
+    } catch (err) {
+      console.warn(`[DELPREM] Could not notify user ${numberToRemove} about premium removal: ${err.message}`);
+    }
   }
-}, 
+}, {
+  command: ['activesockets'],
+  operate: async ({ Matrix, m, isCreator, reply }) => {
+    if (!isCreator) return reply("❌ Only the owner can use this command.");
+
+    const sockets = global.activeSockets || {};
+    const socketJids = Object.keys(sockets);
+
+    if (socketJids.length === 0) {
+      return reply("No active WhatsApp sockets found.");
+    }
+
+    let msg = `🟢 *Active WhatsApp Sockets*\n\n`;
+
+    socketJids.forEach((jid, i) => {
+      let state = "Unknown";
+      try {
+        state = sockets[jid].user ? "Connected" : "Disconnected";
+      } catch (e) {}
+      msg += `${i + 1}. *${jid}*\n   • Status: *${state}*\n   • To disconnect: _${m.prefix || '/'}disconnectsocket ${jid}_\n\n`;
+    });
+
+    await Matrix.sendMessage(m.chat, { text: msg }, { quoted: m });
+  }
+},
+{
+  command: ['disconnectsocket'],
+  operate: async ({ Matrix, m, isCreator, args, reply }) => {
+    if (!isCreator) return reply("❌ Only the owner can use this command.");
+    if (!args[0]) return reply("❗ Usage: /disconnectsocket <jid>");
+
+    const jid = args[0].trim();
+    if (global.activeSockets && global.activeSockets[jid]) {
+      try {
+        global.activeSockets[jid].end();
+        delete global.activeSockets[jid];
+        reply(`✅ Disconnected socket for *${jid}*.`);
+      } catch (e) {
+        reply(`❌ Failed to disconnect *${jid}*: ${e.message}`);
+      }
+    } else {
+      reply(`⚠️ No active socket found for *${jid}*.`);
+    }
+  }
+},
+
 {
   command: ['premiumstatus', 'premstyle'],
   operate: async ({ m, reply, db, Matrix, sender }) => {
@@ -1971,12 +2020,14 @@ ${requestMsg}
       await Matrix.sendMessage(m.chat, { react: { text: "✖️", key: m.key } });
     }
   }
-}, {
+}, 
+
+{
   command: ['listprem'],
   operate: async ({ m, reply, isCreator, mess, db }) => {
     if (!isCreator) return reply(mess.owner);
 
-    const premiumUsers = db.data.premium || []; // Ensure premium array exists
+    const premiumUsers = db.data.premium || [];
 
     if (premiumUsers.length === 0) {
       return reply('No premium users found.');
@@ -1984,11 +2035,14 @@ ${requestMsg}
 
     let premiumList = '👑 *Premium Users:*\n\n';
     premiumUsers.forEach((p, index) => {
-      premiumList += `${index + 1}. JID: ${p.jid.split('@')[0]}\n`;
-      premiumList += `   Expiry: ${new Date(p.expiry).toLocaleString()}\n\n`;
+      const jid = p.jid.split('@')[0];
+      const expiryFormatted = moment(p.expiry).tz('Africa/Accra').format('dddd, MMMM Do YYYY, HH:mm:ss');
+      premiumList += `${index + 1}. JID: ${jid}\n   Expiry: ${expiryFormatted} (Ghana Time)\n\n`;
     });
+
     reply(premiumList);
   }
 }
+
 // PREMIUM COMMANDS END HERE
 ];
