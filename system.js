@@ -188,220 +188,223 @@ global.db.write();
 
 
 module.exports = Matrix = async (Matrix, m, chatUpdate, store) => {
-try {
-const { type, quotedMsg, mentioned, now, fromMe } = m;
+    try {
+        const { type, quotedMsg, mentioned, now, fromMe } = m;
 
-
-if (!Matrix.user || !Matrix.user.id) {
-    console.log("DEBUG: Matrix.user or Matrix.user.id not available yet. Skipping message processing.");
-    return; // Exit if bot user info isn't ready
-}
-
-
-// Get the JID of the current bot instance
-// --- IMPORTANT FIX: NORMALIZE botJid HERE TO REMOVE DEVICE ID (:XX) ---
-const botJid = jidNormalizedUser(Matrix.user.id); // Use jidNormalizedUser to ensure consistent JID format
-
-// --- START MODIFICATION FOR BOT INSTANCE SETTINGS
-
-const BOT_FALLBACK_PREFIX = '.';
-const BOT_FALLBACK_MODE = "public"; // Default mode for any bot instance not specifically configured.
-
-
-if (!global.db.data.users[botJid]) {
-    global.db.data.users[botJid] = {};
-    global.db.data.users[botJid].prefix ??= BOT_FALLBACK_PREFIX;
-    global.db.data.users[botJid].mode ??= BOT_FALLBACK_MODE;
-    global.db.data.users[botJid].autobio ??= false;
-    global.db.data.users[botJid].autotype ??= false;
-    global.db.data.users[botJid].anticall ??= "off";
-    global.db.data.users[botJid].autoread ??= false;
-    global.db.data.users[botJid].adizachat ??= false;
-    global.db.data.users[botJid].statusemoji ??= "🧡";
-    global.db.data.users[botJid].welcome ??= false;
-    global.db.data.users[botJid].autoreact ??= false;
-    global.db.data.users[botJid].antidelete ??= "private";
-    global.db.data.users[botJid].antiedit ??= "private";
-    global.db.data.users[botJid].alwaysonline ??= false;
-    global.db.data.users[botJid].autorecord ??= false;
-    global.db.data.users[botJid].autoviewstatus ??= false;
-    global.db.data.users[botJid].autoreactstatus ??= false;
-    global.db.data.users[botJid].menustyle ??= "2"; // Default menu style
-}
-
-const botInstanceSettings = global.db.data.users[botJid];
-const prefix = botInstanceSettings.prefix;
-const mode = botInstanceSettings.mode;
-
-// --- END MODIFICATION FOR BOT INSTANCE
-
-
-
-var body =
-  m.message?.protocolMessage?.editedMessage?.conversation ||
-  m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
-  m.message?.protocolMessage?.editedMessage?.imageMessage?.caption ||
-  m.message?.protocolMessage?.editedMessage?.videoMessage?.caption ||
-  m.message?.conversation ||
-  m.message?.imageMessage?.caption ||
-  m.message?.videoMessage?.caption ||
-  m.message?.extendedTextMessage?.text ||
-  m.message?.buttonsResponseMessage?.selectedButtonId ||
-  m.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-  m.message?.templateButtonReplyMessage?.selectedId ||
-  m.message?.pollCreationMessageV3?.name ||
-  m.message?.documentMessage?.caption ||
-  m.text || "";
-
-var budy =
-  typeof body === "string" && body.length > 0
-    ? body
-    : typeof m.text === "string"
-      ? m.text
-      : "";
-
-
-const isCmd = body.startsWith(prefix);
-const trimmedBody = isCmd ? body.slice(prefix.length).trimStart() : "";
-
-//command
-const command = isCmd && trimmedBody ? trimmedBody.split(/\s+/).shift().toLowerCase() : "";
-
-
-m.isCmd = isCmd; // Attach isCmd to the m object
-m.command = command; // Attach command to the m object
-// ************************
-
-const args = trimmedBody.split(/\s+/).slice(1);
-const text = args.join(" ");
-const q = text;
-const full_args = body.replace(command, '').slice(1).trim();
-const pushname = m.pushName || "No Name";
-
-// Using botJid directly instead of redeclaring botNumber
-// --- IMPORTANT FIX: botNumber should now be the normalized JID from botJid ---
-const botNumber = botJid; // Already determined as Matrix.user.id and now normalized
-
-const sender = m.sender;
-const senderNumber = sender.split('@')[0];
-const sudoList = Array.isArray(global.db.data.settings.sudo) ? global.db.data.settings.sudo : [];
-
-const allCreatorJids = new Set([
-  // Normalize devMatrix if it's just a number
-  devMatrix.includes('@s.whatsapp.net') ? devMatrix : `${devMatrix}@s.whatsapp.net`,
-  // Normalize global.ownernumber if it's just a number
-  global.ownernumber.includes('@s.whatsapp.net') ? global.ownernumber : `${global.ownernumber}@s.whatsapp.net`,
-
-  ...sudoList.map(jid => jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`)
-]);
-
-const isCreator = allCreatorJids.has(sender);
-const itsMe = sender === botNumber;
-const from = m.key.remoteJid;
-const quotedMessage = m.quoted || m;
-const quoted =
-  quotedMessage?.mtype === "buttonsMessage"
-    ? quotedMessage[Object.keys(quotedMessage)[1]]
-    : quotedMessage?.mtype === "templateMessage" && quotedMessage.hydratedTemplate
-    ? quotedMessage.hydratedTemplate[Object.keys(quotedMessage.hydratedTemplate)[1]]
-    : quotedMessage?.mtype === "product"
-    ? quotedMessage[Object.keys(quotedMessage)[0]]
-    : m.quoted || m; // Fallback for other quoted message types
-const mime = quoted?.msg?.mimetype || quoted?.mimetype || "";
-
-
-// Retrieve sender's premium status for access bypass
-const isSenderPremium = isPremium(m.sender); // Assumes `isPremium` is imported at the top of system.js
-
-// ======= Mode check: restrict commands based on user's mode =======
-// `mode` is already defined at the top as the bot instance's mode
-if (isCmd) {
-  if (mode === "private" && !isCreator && !isSenderPremium) {
-    // Private mode: only creator and premium users can run commands
-    return await Matrix.sendMessage(from, {
-      text: "⚠️ Your bot is currently in *private* mode. Only the owner and premium users can use commands."
-    }, { quoted: m });
-  }
-  if (mode === "group" && !m.isGroup && !isCreator && !isSenderPremium) {
-    // Group only mode: block commands outside groups for non-owner/non-premium
-    return await Matrix.sendMessage(from, {
-      text: "⚠️ Your bot is currently in *group only* mode. Commands work only in groups."
-    }, { quoted: m });
-  }
-  if (mode === "pm" && m.isGroup && !isCreator && !isSenderPremium) {
-    // PM only mode: block commands in groups for non-owner/non-premium
-    return await Matrix.sendMessage(from, {
-      text: "⚠️ Your bot is currently in *private chat only* mode. Commands work only in private chats."
-    }, { quoted: m });
-  }
-  // Public mode: allow all commands (no explicit `return` here, so command proceeds)
-}
-// =======================================================
-
-    // <----------------------------------------------------------------------------------------------------->
-    // PLACE THE NEW STATUS HANDLING BLOCK HERE
-    // <---------------------------------------------------------------------------------------------------->
-
-    const botInstanceSettingsForStatus = global.db.data.users[botJid] || {}; // Reuse botJid
-    const instanceAutoviewStatus = botInstanceSettingsForStatus.autoviewstatus ?? global.db.data.settings.autoviewstatus ?? true; // Default to true
-    const instanceAutoreactStatus = botInstanceSettingsForStatus.autoreactstatus ?? global.db.data.settings.autoreactstatus ?? false; // Default to false
-    const instanceStatusEmoji = botInstanceSettingsForStatus.statusemoji || global.db.data.settings.statusemoji || '🧡'; // Default to '🧡'
-
-    if (m.key && m.key.remoteJid === 'status@broadcast') {
-
-
-      if (instanceAutoviewStatus === true) {
-        try { // <-- ADDED TRY BLOCK
-          await Matrix.readMessages([m.key]);
-          console.log(`[STATUS DEBUG] Successfully attempted to read status for ${m.key.remoteJid} by ${botJid}`); // <-- SUCCESS LOG
-        } catch (readErr) { // <-- ADDED CATCH BLOCK
-          console.error(`[STATUS ERROR] Failed to read status for ${m.key.remoteJid} by ${botJid}:`, readErr); // <-- ERROR LOG
+        if (!Matrix.user || !Matrix.user.id) {
+            console.log("DEBUG: Matrix.user or Matrix.user.id not available yet. Skipping message processing.");
+            return; // Exit if bot user info isn't ready
         }
-      }
 
-      if (instanceAutoreactStatus === true && instanceAutoviewStatus === true) {
-        // --- START COOLDOWN LOGIC FOR REACTIONS ---
-        const lastReactionTime = statusReactionCooldowns.get(botJid);
-        const now = Date.now();
+        // --- IMPORTANT FIX: Ensure global.db.data.users is initialized before use ---
+        if (!global.db || !global.db.data) {
+            console.error("Error: global.db or global.db.data is undefined. Database not loaded.");
+            return; // Exit if database isn't ready
+        }
+        if (!global.db.data.users) {
+            global.db.data.users = {}; // Initialize users object if it's undefined
+            console.warn("global.db.data.users was undefined, initialized as empty object.");
+        }
+        // --- END IMPORTANT FIX ---
 
-        if (lastReactionTime && (now - lastReactionTime < STATUS_REACTION_COOLDOWN_MS)) {
-          console.log(`[STATUS DEBUG] Skipped reaction for ${botJid} due to cooldown.`);
-          // Skip reacting if cooldown is active
-        } else {
-          // Cooldown passed or no previous reaction, proceed to react
-          const reactionEmoji = instanceStatusEmoji;
-          const participant = m.key.participant || m.participant;
-          const messageId = m.key.id;
+        // Get the JID of the current bot instance
+        // --- IMPORTANT FIX: NORMALIZE botJid HERE TO REMOVE DEVICE ID (:XX) ---
+        const botJid = jidNormalizedUser(Matrix.user.id); // Use jidNormalizedUser to ensure consistent JID format
 
-          if (participant && messageId && m.key.id && m.key.remoteJid) {
-            try { // <-- ADDED TRY BLOCK FOR SEND MESSAGE
-              await Matrix.sendMessage(
-                'status@broadcast',
-                {
-                  react: {
-                    key: {
-                      id: m.key.id,
-                      remoteJid: m.key.remoteJid,
-                      participant: participant,
-                    },
-                    text: reactionEmoji,
-                  },
-                },
-                { statusJidList: [participant, botJid] }
-              );
-              statusReactionCooldowns.set(botJid, now); // Update last reaction time for this bot
-              console.log(`[STATUS DEBUG] Successfully sent reaction '${reactionEmoji}' for status by ${botJid}`); // <-- SUCCESS LOG FOR REACTION
-            } catch (reactErr) { // <-- ADDED CATCH BLOCK FOR SEND MESSAGE
-              console.error(`[STATUS ERROR] Failed to send reaction for status by ${botJid}:`, reactErr); // <-- ERROR LOG FOR REACTION
+        // --- START MODIFICATION FOR BOT INSTANCE SETTINGS
+
+        const BOT_FALLBACK_PREFIX = '.';
+        const BOT_FALLBACK_MODE = "public"; // Default mode for any bot instance not specifically configured.
+
+        if (!global.db.data.users[botJid]) {
+            global.db.data.users[botJid] = {};
+            global.db.data.users[botJid].prefix ??= BOT_FALLBACK_PREFIX;
+            global.db.data.users[botJid].mode ??= BOT_FALLBACK_MODE;
+            global.db.data.users[botJid].autobio ??= false;
+            global.db.data.users[botJid].autotype ??= false;
+            global.db.data.users[botJid].anticall ??= "off";
+            global.db.data.users[botJid].autoread ??= false;
+            global.db.data.users[botJid].adizachat ??= false;
+            global.db.data.users[botJid].statusemoji ??= "🧡";
+            global.db.data.users[botJid].welcome ??= false;
+            global.db.data.users[botJid].autoreact ??= false;
+            global.db.data.users[botJid].antidelete ??= "private";
+            global.db.data.users[botJid].antiedit ??= "private";
+            global.db.data.users[botJid].alwaysonline ??= false;
+            global.db.data.users[botJid].autorecord ??= false;
+            global.db.data.users[botJid].autoviewstatus ??= false;
+            global.db.data.users[botJid].autoreactstatus ??= false;
+            global.db.data.users[botJid].menustyle ??= "2"; // Default menu style
+        }
+
+        const botInstanceSettings = global.db.data.users[botJid];
+        const prefix = botInstanceSettings.prefix;
+        const mode = botInstanceSettings.mode;
+
+        // --- END MODIFICATION FOR BOT INSTANCE
+
+        var body =
+            m.message?.protocolMessage?.editedMessage?.conversation ||
+            m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
+            m.message?.protocolMessage?.editedMessage?.imageMessage?.caption ||
+            m.message?.protocolMessage?.editedMessage?.videoMessage?.caption ||
+            m.message?.conversation ||
+            m.message?.imageMessage?.caption ||
+            m.message?.videoMessage?.caption ||
+            m.message?.extendedTextMessage?.text ||
+            m.message?.buttonsResponseMessage?.selectedButtonId ||
+            m.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+            m.message?.templateButtonReplyMessage?.selectedId ||
+            m.message?.pollCreationMessageV3?.name ||
+            m.message?.documentMessage?.caption ||
+            m.text || "";
+
+        var budy =
+            typeof body === "string" && body.length > 0 ?
+            body :
+            typeof m.text === "string" ?
+            m.text :
+            "";
+
+        const isCmd = body.startsWith(prefix);
+        const trimmedBody = isCmd ? body.slice(prefix.length).trimStart() : "";
+
+        //command
+        const command = isCmd && trimmedBody ? trimmedBody.split(/\s+/).shift().toLowerCase() : "";
+
+        m.isCmd = isCmd; // Attach isCmd to the m object
+        m.command = command; // Attach command to the m object
+        // ************************
+
+        const args = trimmedBody.split(/\s+/).slice(1);
+        const text = args.join(" ");
+        const q = text;
+        const full_args = body.replace(command, '').slice(1).trim();
+        const pushname = m.pushName || "No Name";
+
+        // Using botJid directly instead of redeclaring botNumber
+        // --- IMPORTANT FIX: botNumber should now be the normalized JID from botJid ---
+        const botNumber = botJid; // Already determined as Matrix.user.id and now normalized
+
+        const sender = m.sender;
+        const senderNumber = sender.split('@')[0];
+        const sudoList = Array.isArray(global.db.data.settings.sudo) ? global.db.data.settings.sudo : [];
+
+        const allCreatorJids = new Set([
+            // Normalize devMatrix if it's just a number
+            devMatrix.includes('@s.whatsapp.net') ? devMatrix : `${devMatrix}@s.whatsapp.net`,
+            // Normalize global.ownernumber if it's just a number
+            global.ownernumber.includes('@s.whatsapp.net') ? global.ownernumber : `${global.ownernumber}@s.whatsapp.net`,
+
+            ...sudoList.map(jid => jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`)
+        ]);
+
+        const isCreator = allCreatorJids.has(sender);
+        const itsMe = sender === botNumber;
+        const from = m.key.remoteJid;
+        const quotedMessage = m.quoted || m;
+        const quoted =
+            quotedMessage?.mtype === "buttonsMessage" ?
+            quotedMessage[Object.keys(quotedMessage)[1]] :
+            quotedMessage?.mtype === "templateMessage" && quotedMessage.hydratedTemplate ?
+            quotedMessage.hydratedTemplate[Object.keys(quotedMessage.hydratedTemplate)[1]] :
+            quotedMessage?.mtype === "product" ?
+            quotedMessage[Object.keys(quotedMessage)[0]] :
+            m.quoted || m; // Fallback for other quoted message types
+        const mime = quoted?.msg?.mimetype || quoted?.mimetype || "";
+
+
+        // Retrieve sender's premium status for access bypass
+        const isSenderPremium = isPremium(m.sender); // Assumes `isPremium` is imported at the top of system.js
+
+        // ======= Mode check: restrict commands based on user's mode =======
+        // `mode` is already defined at the top as the bot instance's mode
+        if (isCmd) {
+            if (mode === "private" && !isCreator && !isSenderPremium) {
+                // Private mode: only creator and premium users can run commands
+                return await Matrix.sendMessage(from, {
+                    text: "⚠️ Your bot is currently in *private* mode. Only the owner and premium users can use commands."
+                }, { quoted: m });
             }
-          }
+            if (mode === "group" && !m.isGroup && !isCreator && !isSenderPremium) {
+                // Group only mode: block commands outside groups for non-owner/non-premium
+                return await Matrix.sendMessage(from, {
+                    text: "⚠️ Your bot is currently in *group only* mode. Commands work only in groups."
+                }, { quoted: m });
+            }
+            if (mode === "pm" && m.isGroup && !isCreator && !isSenderPremium) {
+                // PM only mode: block commands in groups for non-owner/non-premium
+                return await Matrix.sendMessage(from, {
+                    text: "⚠️ Your bot is currently in *private chat only* mode. Commands work only in private chats."
+                }, { quoted: m });
+            }
+            // Public mode: allow all commands (no explicit `return` here, so command proceeds)
         }
+        // =======================================================
 
-      }
-      console.log(`-----------------------------------\n`); // Move end debug log here to cover entire status block
-      return; // Exit here if it's a status message
-    }
-    // <---------------------------------------------------------------------------------------------------------------->
+        // <----------------------------------------------------------------------------------------------------->
+        // PLACE THE NEW STATUS HANDLING BLOCK HERE
+        // <---------------------------------------------------------------------------------------------------->
+
+        const botInstanceSettingsForStatus = global.db.data.users[botJid] || {}; // Reuse botJid
+        const instanceAutoviewStatus = botInstanceSettingsForStatus.autoviewstatus ?? global.db.data.settings.autoviewstatus ?? true; // Default to true
+        const instanceAutoreactStatus = botInstanceSettingsForStatus.autoreactstatus ?? global.db.data.settings.autoreactstatus ?? false; // Default to false
+        const instanceStatusEmoji = botInstanceSettingsForStatus.statusemoji || global.db.data.settings.statusemoji || '🧡'; // Default to '🧡'
+
+        if (m.key && m.key.remoteJid === 'status@broadcast') {
+
+
+            if (instanceAutoviewStatus === true) {
+                try { // <-- ADDED TRY BLOCK
+                    await Matrix.readMessages([m.key]);
+                    console.log(`[STATUS DEBUG] Successfully attempted to read status for ${m.key.remoteJid} by ${botJid}`); // <-- SUCCESS LOG
+                } catch (readErr) { // <-- ADDED CATCH BLOCK
+                    console.error(`[STATUS ERROR] Failed to read status for ${m.key.remoteJid} by ${botJid}:`, readErr); // <-- ERROR LOG
+                }
+            }
+
+            if (instanceAutoreactStatus === true && instanceAutoviewStatus === true) {
+                // --- START COOLDOWN LOGIC FOR REACTIONS ---
+                const lastReactionTime = statusReactionCooldowns.get(botJid);
+                const now = Date.now();
+
+                if (lastReactionTime && (now - lastReactionTime < STATUS_REACTION_COOLDOWN_MS)) {
+                    console.log(`[STATUS DEBUG] Skipped reaction for ${botJid} due to cooldown.`);
+                    // Skip reacting if cooldown is active
+                } else {
+                    // Cooldown passed or no previous reaction, proceed to react
+                    const reactionEmoji = instanceStatusEmoji;
+                    const participant = m.key.participant || m.participant;
+                    const messageId = m.key.id;
+
+                    if (participant && messageId && m.key.id && m.key.remoteJid) {
+                        try { // <-- ADDED TRY BLOCK FOR SEND MESSAGE
+                            await Matrix.sendMessage(
+                                'status@broadcast', {
+                                    react: {
+                                        key: {
+                                            id: m.key.id,
+                                            remoteJid: m.key.remoteJid,
+                                            participant: participant,
+                                        },
+                                        text: reactionEmoji,
+                                    },
+                                }, { statusJidList: [participant, botJid] }
+                            );
+                            statusReactionCooldowns.set(botJid, now); // Update last reaction time for this bot
+                            console.log(`[STATUS DEBUG] Successfully sent reaction '${reactionEmoji}' for status by ${botJid}`); // <-- SUCCESS LOG FOR REACTION
+                        } catch (reactErr) { // <-- ADDED CATCH BLOCK FOR SEND MESSAGE
+                            console.error(`[STATUS ERROR] Failed to send reaction for status by ${botJid}:`, reactErr); // <-- ERROR LOG FOR REACTION
+                        }
+                    }
+                }
+
+            }
+            console.log(`-----------------------------------\n`); // Move end debug log here to cover entire status block
+            return; // Exit here if it's a status message
+        }
+        // <---------------------------------------------------------------------------------------------------------------->
+
 
 /// ========================GROUP METADATA===========================//
 
