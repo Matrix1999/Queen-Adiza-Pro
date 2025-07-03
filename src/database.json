@@ -1,8 +1,7 @@
 {
   "chats": {},
+  "users": {},
   "settings": {
-    "prefix": ".",
-    "mode": "public",
     "autobio": false,
     "anticall": false,
     "autotype": false,
@@ -22,8 +21,10 @@
       "254796180545@s.whatsapp.net",
       "254712345678@s.whatsapp.net"
     ]
+    
   },
   "blacklist": {
     "blacklisted_numbers": []
-  }
+  },
+  "premium": []  
 }
