@@ -23,9 +23,9 @@ global.SESSION_ID = process.env.SESSION_ID || ''
 global.botname = process.env.BOT_NAME || 'Queen-Adiza'
 
 //--------------------[ TELEGRAM BOT SETTINGS ]----------------------//
-global.BOT_TOKEN = process.env.BOT_TOKEN || "7992929848:AAGrK35akkgJclY7f9cF4cAXoYlo-honGV0" // Telegram bot token
+global.BOT_TOKEN = process.env.BOT_TOKEN || "8038555102:AAE63xWoeX2WVB_sDT46LzUiwZNpxaCvwQI" // Telegram bot token
 
-global.BOT_NAME = process.env.TELEGRAM_BOT_NAME || "RashidaPair_bot" // Telegram bot name
+global.BOT_NAME = process.env.TELEGRAM_BOT_NAME || "AdizaPair_Bot" // Telegram bot name
 
 global.OWNER_NAME = process.env.TELEGRAM_OWNER_NAME || "@Matrixxxxxxxxx" // Telegram owner name with sign @
 
@@ -69,7 +69,7 @@ global.timezones = "Africa/Accra";
 
 //------------------[ WATERMARK ]--------------------//
 
-global.wm = process.env.GL_WM || "Â®ð˜¼ð™™ð™žð™¯ð™–ð™©ð™ªðŸŒ¹"
+global.wm = process.env.GL_WM || "庐饾樇饾櫃饾櫈饾櫙饾櫀饾櫓饾櫔馃尮"
 
 //---------------------[ REPLIES ]-----------------------//
 
@@ -78,7 +78,7 @@ global.mess = {
   success: '?Matrix',
   owner: `*You don't have permission to use this command!*`,
   group: '*This feature becomes available when you use it in a group!*',
-  admin: '*You¡¯ll unlock this feature with me as an admin!*',
+  admin: '*You’ll unlock this feature with me as an admin!*',
   notadmin: '*This feature will work once you become an admin. A way of ensuring order!*',
   premium: '? This command is reserved for premium users. Please contact the owner to inquire about premium access.'
 }
