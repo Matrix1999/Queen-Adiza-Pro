@@ -1,4 +1,4 @@
-global.AdizaIndex = 0;
+global.AdizaIndex = 0; // Consider if this is still needed or used
 require('./settings')
 const {
   generateWAMessageFromContent,
@@ -6,22 +6,22 @@ const {
   downloadContentFromMessage,
 } = require("@whiskeysockets/baileys");
 const { pluginManager } = require('./index');
-const { xeon_antispam } = require('./lib/antispam.js');
+const { xeon_antispam } = require('./lib/antispam.js'); // Not used in this snippet
 const { exec, spawn, execSync } = require("child_process")
-const spamTracker = new Map();
+const spamTracker = new Map(); // Not used in this snippet
 const { jidNormalizedUser } = require('@whiskeysockets/baileys');
-const AdmZip = require('adm-zip');
+const AdmZip = require('adm-zip'); // Not used in this snippet
 let chatHistory = {};
 const { jidDecode } = require("@whiskeysockets/baileys");
 const { calculateExpiry, isPremium, checkCommandAccess } = require('./lib/premiumSystem');
 const callCounts = {};
 const handledCallIds = new Set();
 const util = require('util')
-const fetch = require('node-fetch')
+const fetch = require('node-fetch') // Not used in this snippet
 const path = require('path')
-const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
-const mime = require('mime-types');
-const { fromBuffer } = require('file-type');
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai'); // Not used in this snippet
+const mime = require('mime-types'); // Not used in this snippet
+const { fromBuffer } = require('file-type'); // Not used in this snippet
 const fs = require('fs');
 const axios = require('axios')
 const acrcloud = require ('acrcloud');
@@ -33,7 +33,7 @@ const lolcatjs = require('lolcatjs')
 const os = require('os');
 const speed = require('performance-now')
 const { performance } = require('perf_hooks');
-const yts = require("yt-search")
+const yts = require("yt-search") // Not used in this snippet
 const jsobfus = require("javascript-obfuscator");
 const {
   color
@@ -52,6 +52,10 @@ const STATUS_REACTION_COOLDOWN_MS = 10 * 1000;
 const generalReactionCooldowns = new Map();
 const GENERAL_REACTION_COOLDOWN_MS = 10 * 1000;
 
+// Global map for chatbot to prevent duplicate replies
+const lastProcessedMessageId = new Map();
+const chatbotCooldowns = new Map(); // New map for chatbot rate limiting
+const CHATBOT_COOLDOWN_MS = 5 * 1000; // 5 seconds cooldown per user for chatbot
 
 const {
     smsg,
@@ -59,7 +63,7 @@ const {
     getTime,
     getGroupAdmins,
     formatp,
-    await,
+    await: awaitFunc, // Renamed to avoid conflict with `await` keyword
     sleep,
     isUrl,
     runtime,
@@ -98,7 +102,7 @@ const recordError = (error) => {
 };
 
 const shouldLogError = (error) => {
-  const now = Date.now(); // Fixed typo: Date.Date() -> Date.now()
+  const now = Date.now();
   if (errorLog.has(error)) {
     const lastLoggedTime = errorLog.get(error);
     if (now - lastLoggedTime < ERROR_EXPIRY_TIME) {
@@ -129,7 +133,7 @@ const matrix14 = fs.readFileSync("./Media/Images/Adiza14.jpg");
 
 //Version
 const versions = require("./package.json").version;
-const dlkey = '_0x5aff35,_0x1876stqr';
+global.dlkey = '_0x5aff35,_0x1876stqr'; // Made global for consistent access
 
 //badwords
 const bad = JSON.parse(fs.readFileSync("./src/badwords.json"));
@@ -445,13 +449,13 @@ if (m.isGroup && !global.db.data.chats[m.chat]) {
 
 // =====================  ANTIBOT HANDLER ======================//
 
-if (m.isGroup && global.db.data.chats[m.chat].antibot) { 
-  const isGeneralPrefixedCommand = budy && budy.length > 0 && 
-                                   !/\s/.test(budy.charAt(0)) && 
+if (m.isGroup && global.db.data.chats[m.chat].antibot) {
+  const isGeneralPrefixedCommand = budy && budy.length > 0 &&
+                                   !/\s/.test(budy.charAt(0)) &&
                                    !/[a-zA-Z0-9]/.test(budy.charAt(0));
 
 
-  if (isGeneralPrefixedCommand && !m.key.fromMe) { 
+  if (isGeneralPrefixedCommand && !m.key.fromMe) {
     console.log(`[ANTIBOT] Conditions met! Silently ignoring ANY bot/user command (except my own bot) from: ${m.sender} - "${budy}"`);
     return; // Stop all further processing for this message
   }
@@ -526,7 +530,7 @@ async function deleteHerokuEnvVar(varName) {
 // Function to fetch MP3 download URL
 async function fetchMp3DownloadUrl(link) {
   const fetchDownloadUrl1 = async (videoUrl) => {
-    const apiUrl = `https://api.giftedtech.my.id/api/download/dlmp3?apikey=${dlkey}&url=${videoUrl}`;
+    const apiUrl = `https://api.giftedtech.my.id/api/download/dlmp3?apikey=${global.dlkey}&url=${videoUrl}`; // Use global.dlkey
     try {
       const response = await axios.get(apiUrl);
       if (response.status !== 200 || !response.data.success) {
@@ -587,9 +591,9 @@ async function fetchMp3DownloadUrl(link) {
 
 async function fetchVideoDownloadUrl(link) {
   if (!link) throw new Error('No video URL provided.');
-  if (typeof dlkey === 'undefined') throw new Error('API key (dlkey) is not defined.');
+  if (typeof global.dlkey === 'undefined') throw new Error('API key (dlkey) is not defined.'); // Use global.dlkey
 
-  const primaryApiUrl = `https://api.giftedtech.my.id/api/download/dlmp4?apikey=${dlkey}&url=${encodeURIComponent(link)}`;
+  const primaryApiUrl = `https://api.giftedtech.my.id/api/download/dlmp4?apikey=${global.dlkey}&url=${encodeURIComponent(link)}`; // Use global.dlkey
   const fallbackApiUrl = `https://api.siputzx.my.id/api/d/ytmp4?url=${encodeURIComponent(link)}`;
 
   try {
@@ -651,7 +655,7 @@ async function saveStatusMessage(m, saveToDM = false) {
         messageType = 'video';
         caption = m.quoted.message.videoMessage.caption || caption; // Use existing caption if present
     }
-    
+
 
     if (!messageToDownload || !messageType) {
       return m.reply('*The replied message is not a valid status (image or video). Please reply to a status message!*');
@@ -766,10 +770,13 @@ return arr[Math.floor(Math.random() * arr.length)]
 }
 
 // TAKE  PP USER
+let ppuser;
 try {
-var ppuser = await Matrix.profilePictureUrl(m.sender, 'image')} catch (err) {
-let ppuser = 'https://telegra.ph/file/6880771a42bad09dd6087.jpg'}
-let ppUrl = await Matrix.profilePictureUrl(m.sender, 'image').catch(_ => 'https://telegra.ph/file/6880771a42bad09dd6087.jpg')
+    ppuser = await Matrix.profilePictureUrl(m.sender, 'image');
+} catch (err) {
+    ppuser = 'https://telegra.ph/file/6880771a42bad09dd6087.jpg';
+}
+let ppUrl = ppuser; // Assigning ppUrl to be the same as ppuser now
 
 //================== [ DATABASE ] ==================//
 try {
@@ -859,7 +866,6 @@ if (global.db.data.users[botJid]?.autotype) {
 
 //<================================================>//
     // ANTIBOT
-    
 
 
 
@@ -1247,7 +1253,7 @@ if (
 // ANTICALL HANDLER
 
 Matrix.ev.on('call', async (callEvent) => {
-  
+
   const mode = botInstanceSettings.anticall ?? global.db.data.settings.anticall ?? "off"; // Default to "off" if not found anywhere
 
   // If anticall is off or not set, do nothing
@@ -1559,7 +1565,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiimage) {
   const senderId  = m.sender;
   const isImage   = msg.imageMessage;
 
-  
+
   if (isImage && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     const now = m.messageTimestamp * 1000;
     global.imageCounts[senderId] = global.imageCounts[senderId] || { count: 0, lastTimestamp: 0 };
@@ -1894,7 +1900,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
         const liftDate = new Date(liftT);
         const unblockDateStr = liftDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Accra' });
         const unblockTimeStr = liftDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Africa/Accra' });
-        
+
         // Notify group that user is unblocked
         await Matrix.sendMessage(chatId, { text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
 ┃  ✅ *BLOCK LIFTED* ✅
@@ -1905,7 +1911,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
 ┃ 📅 ${unblockDateStr}
 ┃ ⏰ ${unblockTimeStr}
 ┗━━━━━━━━━━━━━━━━━━━━━━┛` }).catch(e => console.error(`Error sending unblock message to group for ${senderId.split('@')[0]}:`, e));
-        
+
         // Also send a private message to the unblocked user
         await Matrix.sendMessage(senderId, { text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
 ┃  ✅ *BLOCK LIFTED* ✅
@@ -1916,7 +1922,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
 ┃ 📅 ${unblockDateStr}
 ┃ ⏰ ${unblockTimeStr}
 ┗━━━━━━━━━━━━━━━━━━━━━━┛` }).catch(e => console.error(`Error sending unblock message to ${senderId.split('@')[0]} in DM:`, e));
-        
+
         delete global.antispam1Counts[senderId]; // Remove user from tracking after unblock
       }, user.blockedUntil - now);
       return; // Stop further processing for this message after blocking
@@ -1925,6 +1931,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
 }
 
 //<================================================>//
+
 
 // This block handles the "kick" mode for antilinkgc
 if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkgckick) { // Note the check for antilinkgckick
