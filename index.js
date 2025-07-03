@@ -1,7 +1,6 @@
 
 require('events').EventEmitter.defaultMaxListeners = 50;
 require('./settings'); 
-
 const {
     Telegraf,
     Markup
@@ -9,6 +8,7 @@ const {
 const {
     simple
 } = require("./lib/myfunc"); 
+global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
 const fs = require("fs");
 const os = require('os');
 const speed = require('performance-now');
@@ -16,6 +16,8 @@ const axios = require("axios");
 const chalk = require('chalk');
 const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
+
+const extendWASocket = require('./lib/matrixUtils'); 
 
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
@@ -77,6 +79,8 @@ const localDb = path.join(__dirname, "src", "database.json");
 
 global.db = new Low(new JSONFile(localDb));
 
+// ... (lines above global.loadDatabase)
+
 global.loadDatabase = async function loadDatabase() {
     if (global.db.READ) return new Promise(resolve => setInterval(() => {
         if (!global.db.READ) {
@@ -94,8 +98,8 @@ global.loadDatabase = async function loadDatabase() {
 
         if (!global.db.data || Object.keys(global.db.data).length === 0) {
             console.log("[ADIZATU] Syncing local database...");
-            await readDB();
-            await global.db.read();
+            await readDB(); // Ensure this `readDB` populates `global.db.data` correctly
+            await global.db.read(); // Read again after potential sync
         }
 
     } catch (error) {
@@ -104,14 +108,14 @@ global.loadDatabase = async function loadDatabase() {
 
     global.db.READ = false;
 
-    global.db.data ??= {};  // Ensure it's an object if null
- 
+    global.db.data ??= {}; // Ensure it's an object if null
     
+    // --- START MODIFICATION ---
     global.db.data = {
       chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
+      users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
       settings: global.db.data.settings && Object.keys(global.db.data.settings).length ? global.db.data.settings : {
-        prefix: ".",
-        mode: "public",
+    
         autobio: false,
         anticall: false,
         autotype: false,
@@ -123,8 +127,8 @@ global.loadDatabase = async function loadDatabase() {
         statusemoji: "🧡",
         autorecord: false,
         antidelete: "private",
-        alwaysonline: true,
-        autoviewstatus: true,
+        alwaysonline: false,
+        autoviewstatus: false,
         autoreactstatus: false,
         autorecordtype: false
       },
@@ -132,13 +136,14 @@ global.loadDatabase = async function loadDatabase() {
         blacklisted_numbers: []
       },
       sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
-      // ADD THIS LINE
       premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
 };
+    // --- END MODIFICATION ---
 
     global.db.chain = _.chain(global.db.data);
     await global.db.write();
 };
+
 
 // GitHub Functions
 async function getOctokit() {
@@ -193,8 +198,8 @@ async function readDB() {
             statusemoji: "🧡",
             autorecord: false,
             antidelete: "private",
-            alwaysonline: true,
-            autoviewstatus: true,
+            alwaysonline: false,
+            autoviewstatus: false,
             autoreactstatus: false,
             autorecordtype: false
         };
@@ -311,41 +316,9 @@ return new Promise((resolve) => {
 rl.question(text, resolve)
 })
 };
-// axios already imported at the top
-const config = {
-  owner: "Matrix1999",
-  repo: "Queen-Adiza",
-  currentVersion: "2.4.2", // Replace with your current version
-};
 
-async function checkForUpdates() {
-  try {
-    const apiUrl = `https://api.github.com/repos/${config.owner}/${config.repo}/releases/latest`;
-    const response = await axios.get(apiUrl);
-    const latestVersion = response.data.tag_name;
 
-    // Robustly remove ALL leading 'v' characters
-    const cleanedLatestVersion = latestVersion.replace(/^v+/g, "");
-    const cleanedCurrentVersion = config.currentVersion.replace(/^v+/g, "");
 
-    if (cleanedLatestVersion !== cleanedCurrentVersion) {
-      return `🚀 Update available!\nLatest: v${cleanedLatestVersion}\nCurrent: v${cleanedCurrentVersion}`;
-    } else {
-      return `✅ Queen Adiza is up to date (v${cleanedCurrentVersion}).`;
-    }
-  } catch (error) {
-    if (error.response) {
-      // API error
-      return `⚠️ API Error: ${error.response.status} - ${error.response.statusText}`;
-    } else if (error.request) {
-      // Network error
-      return `⚠️ Network Error: Could not reach GitHub API.`;
-    } else {
-      // Other error
-      return `⚠️ Error checking for updates: ${error.message}`;
-    }
-  }
-}
 function cleanUp() {
   const _0x1c5d11 = [path.join(__dirname, ".npm"), path.join(__dirname, ".cache")];
   _0x1c5d11.forEach(_0x216fb8 => {
@@ -473,45 +446,70 @@ async function downloadSessionData() {
 }
 
 async function startMatrix() {
-const {  state, saveCreds } =await useMultiFileAuthState(`./session`)
-    const msgRetryCounterCache = new NodeCache();
-    const Matrix = makeWASocket({
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: !pairingCode,
-       version: [2, 3000, 1017531287],
-      browser: Browsers.ubuntu('Edge'),
-     auth: {
-         creds: state.creds,
-         keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
-      },
-      markOnlineOnConnect: true,
-      generateHighQualityLinkPreview: true,
-      getMessage: async (key) => {
+  const { state, saveCreds } = await useMultiFileAuthState(`./session`);
+  const msgRetryCounterCache = new NodeCache();
 
-         let jid = jidNormalizedUser(key.remoteJid)
-         let msg = await store.loadMessage(jid, key.id)
+  const Matrix = makeWASocket({
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: !pairingCode,
+    version: [2, 3000, 1017531287],
+    browser: Browsers.ubuntu('Edge'),
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
+    },
+    markOnlineOnConnect: true,
+    generateHighQualityLinkPreview: true,
+    getMessage: async (key) => {
+      let jid = jidNormalizedUser(key.remoteJid);
+      let msg = await store.loadMessage(jid, key.id);
+      if (msg) return msg?.message || "";
+      return key.id ? (await Matrix.fetchMessagesFromWA(key.remoteJid, [key])).messages[0]?.message || '' : '';
+    },
+    msgRetryCounterCache,
+    defaultQueryTimeoutMs: undefined,
+  });
 
-         return msg?.message || ""
-      },
-      msgRetryCounterCache,
-      defaultQueryTimeoutMs: undefined, // for this issues https://github.com/WhiskeySockets/Baileys/issues/276
-   })
+  // Extend the Matrix object with your custom utilities
+  extendWASocket(Matrix);
 
-//   store.bind(Matrix.ev)
+  // Presence update event listener — track who is online/offline
+  Matrix.ev.on('presence.update', ({ id, presences }) => {
+  
+    if (!store.presences) store.presences = {};
+    if (!store.presences[id]) store.presences[id] = {};
 
-if(usePairingCode && !Matrix.authState.creds.registered) {
+    if (presences) {
+      for (const [userJid, presenceInfo] of Object.entries(presences)) {
+        if (presenceInfo.lastKnownPresence === 'available') {
+          store.presences[id][userJid] = true;
+        } else {
+          delete store.presences[id][userJid];
+        }
+      }
+    }
+  });
+
+  
+  setInterval(() => {
+  }, 10000);
+  // --- END ADDED DEBUG LOG ---
+
+  // Your existing pairing code logic
+  if (usePairingCode && !Matrix.authState.creds.registered) {
     if (useMobile) throw new Error('Cannot use pairing code with mobile API');
 
-        let phoneNumber;
-       phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Number to be connected to Adiza Bot?\nExample 233593734312:- `)))
-        phoneNumber = phoneNumber.trim();
+    let phoneNumber;
+    phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Number to be connected to Adiza Bot?\nExample 233593734312:- `)));
+    phoneNumber = phoneNumber.trim();
 
-        setTimeout(async () => {
-            const code = await Matrix.requestPairingCode(phoneNumber);
+    setTimeout(async () => {
+      const code = await Matrix.requestPairingCode(phoneNumber);
       console.log(chalk.black(chalk.bgWhite(`[ADIZATU]:- ${code}`)));
-        }, 3000);
-    }
+    }, 3000);
+  }
 
+  
 
 Matrix.ev.on('connection.update', async (update) => {
 	const {
@@ -569,23 +567,33 @@ acceptGroupInvite(inviteCode).then(() => {
   console.log("🚀🚀⚡ 🤖 ⚡🚀🚀");
 });
 
-// Check for updates (assumed async function)
-const updates = await checkForUpdates();
+
 await Matrix.sendMessage(Matrix.user.id, {
   text:
     "╭༺◈👸🌹𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔🌹👸\n" +
     "│📌 » *Username*: " + Matrix.user.name + "\n" +
     "│💻 » *Platform*: " + os.platform() + "\n" +
-    "│⚡ » *Prefix*: [ " + global.db.data.settings.prefix + " ]\n" +
-    "│🚀 » *Mode*: " + modeStatus + "\n" +
+    "│⚡ » *Global Fallback Prefix*: [ . ]\n" + 
+    "│🚀 » *Global Fallback Mode*: Public\n" +
     "│🤖 » *Version*: [ " + versions + " ]\n" +
-    "╰───━━━༺◈༻━━━───╯\n\n" +
-    "╭༺◈🚀 *𝗨𝗣𝗗𝗔𝗧𝗘𝗦* 🚀◈༻╮\n" +
-    "│" + updates + "\n" +
-    "╰───━━━༺◈༻━━━───╯"
+    "╰───━━━༺◈༻━━━───╯\n\n" + // Main bot info block
+
+    "╭༺◈👑 *𝗕𝗢𝗧 𝗦𝗧𝗔𝗧𝗨𝗦* 👑◈༻╮\n" +
+    `│🕒 *Uptime*: ${runtime(process.uptime())}\n` +
+    "╰───━━━༺◈༻━━━───╯\n\n" + 
+
+    
+    "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" +
+    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMM YYYY')}\n` +
+    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` + 
+    `╰───━━━༺◈༻━━━───╯\n` 
+
 }, {
   ephemeralExpiration: 1800
 });
+
+
+
 
         // ====================================\\
         // Add deleteFolderRecursive and pairing folder cleanup from main.js here
@@ -692,221 +700,44 @@ Matrix.ev.on('messages.update',
         });
 
 
+// Merged messages.upsert handler
 Matrix.ev.on('messages.upsert', async (chatUpdate) => {
   try {
-    const messages = chatUpdate.messages;
+    const processedMessages = new Set();
 
-    for (const kay of messages) {
-      if (!kay.message) continue;
+    for (const msg of chatUpdate.messages) {
+      if (!msg.message) continue;
 
-     kay.message = normalizeMessageContent(kay.message);
+      // Save message for persistence
+      const chatId = msg.key.remoteJid;
+      const messageId = msg.key.id;
+      saveStoredMessages(chatId, messageId, msg);
 
-      if (kay.key && kay.key.remoteJid === 'status@broadcast') {
-        if (global.db.data.settings.autoviewstatus === true) {
-          await Matrix.readMessages([kay.key]);
-        }
+      // Normalize message content
+      msg.message = normalizeMessageContent(msg.message);
 
-        if (global.db.data.settings.autoreactstatus === true && global.db.data.settings.autoviewstatus === true) {
-          const reactionEmoji = global.db.data.settings.statusemoji || '💚';
-          const participant = kay.key.participant || kay.participant;
-          const botJid = await Matrix.decodeJid(Matrix.user.id);
-          const messageId = kay.key.id;
+      // Filter unwanted message IDs
+      if (
+        msg.key.id.startsWith('BAE5') ||
+        (msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
+        (!msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
+        (msg.key.id.length !== 32 && msg.key.id.length !== 20)
+      ) continue;
 
-          if (participant && messageId && kay.key.id && kay.key.remoteJid) {
-            await Matrix.sendMessage(
-              'status@broadcast',
-              {
-                react: {
-                  key: {
-                    id: kay.key.id,
-                    remoteJid: kay.key.remoteJid,
-                    participant: participant,
-                  },
-                  text: reactionEmoji,
-                },
-              },
-              { statusJidList: [participant, botJid] }
-            );
-          }
-        }
+      // Avoid processing duplicates
+      if (processedMessages.has(messageId)) continue;
+      processedMessages.add(messageId);
 
-        continue;
-      }
-
-if (
-  kay.key.id.startsWith('BAE5') ||
-  kay.key.id.startsWith('3EBO') && kay.key.id.length === 22 ||
-  (!kay.key.id.startsWith('3EBO') && kay.key.id.length === 22) ||
-  (kay.key.id.length !== 32 && kay.key.id.length !== 20)
-) continue;
-
-const processedMessages = new Set();
-const messageId = kay.key.id;
-if (processedMessages.has(messageId)) continue;
-processedMessages.add(messageId);
-
-      const m = smsg(Matrix, kay, store);
-// ==================== ANTI-DELETE HANDLER ==========//
-if (
-    kay.message?.protocolMessage?.type === 0 &&
-    kay.message?.protocolMessage?.key
-) {
-    try {
-        const mode = global.db.data.settings.antidelete || 'private';
-
-        if (mode === 'off') {
-            // Anti-delete is disabled, skip processing
-            return;
-        }
-
-        const messageId = kay.message.protocolMessage.key.id;
-        const chatId = kay.key.remoteJid;
-        const deletedBy = kay.key.participant || kay.participant || (kay.key.fromMe ? Matrix.user.id : kay.key.remoteJid);
-
-        const storedMessages = loadStoredMessages();
-        const deletedMsg = storedMessages[chatId]?.[messageId];
-
-        if (!deletedMsg) {
-            console.log("⚠️ Deleted message not found in database.");
-            return;
-        }
-
-        const sender = deletedMsg.key.participant || deletedMsg.key.remoteJid;
-
-        // Chat name logic
-        let chatName;
-        if (deletedMsg.key.remoteJid === 'status@broadcast') {
-            chatName = "Status Update";
-        } else if (kay.key.remoteJid.endsWith('@g.us')) {
-            try {
-                const groupInfo = await Matrix.groupMetadata(chatId);
-                chatName = groupInfo.subject || "Group Chat";
-            } catch {
-                chatName = "Group Chat";
-            }
-        } else {
-            chatName = deletedMsg.pushName || kay.pushName || "Private Chat";
-        }
-
-        const xtipes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).locale('en').format('HH:mm z');
-        const xdptes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).format("DD/MM/YYYY");
-
-        // Decide where to send the recovered message
-        const targetJid = (mode === 'private') ? Matrix.user.id : chatId;
-
-        // Handle media and text separately
-        if (!deletedMsg.message.conversation && !deletedMsg.message.extendedTextMessage) {
-            try {
-                let forwardedMsg = await Matrix.sendMessage(
-                    targetJid,
-                    {
-                        forward: deletedMsg,
-                        contextInfo: { isForwarded: false }
-                    },
-                    { quoted: deletedMsg }
-                );
-
-                let mediaInfo = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝙳𝙸𝙰!* 🚨
-${readmore}
-𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]}
-𝚃𝙸𝙼𝙴: ${xtipes}
-𝙳𝙰𝚃𝙴: ${xdptes}
-𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}`;
-
-                await Matrix.sendMessage(
-                    targetJid,
-                    { text: mediaInfo, mentions: [sender, deletedBy] },
-                    { quoted: forwardedMsg }
-                );
-
-            } catch (mediaErr) {
-                console.error("Media recovery failed:", mediaErr);
-                let replyText = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝚂𝚂𝙰𝙶𝙴!* 🚨
-${readmore}
-𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]}
-𝚃𝙸𝙼𝙴 𝚂𝙴𝙽𝚃: ${xtipes}
-𝙳𝙰𝚃𝙴 𝚂𝙴𝙽𝚃: ${xdptes}
-𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}
-
-𝙼𝙴𝚂𝚂𝙰𝙶𝙴: [Unsupported media content]`;
-
-                let quotedMessage = {
-                    key: {
-                        remoteJid: chatId,
-                        fromMe: sender === Matrix.user.id,
-                        id: messageId,
-                        participant: sender
-                    },
-                    message: { conversation: "Media recovery failed" }
-                };
-
-                await Matrix.sendMessage(
-                    targetJid,
-                    { text: replyText, mentions: [sender, deletedBy] },
-                    { quoted: quotedMessage }
-                );
-            }
-        }
-        else {
-            let text = deletedMsg.message.conversation ||
-                      deletedMsg.message.extendedTextMessage?.text;
-
-            let replyText = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼??𝚂𝚂𝙰𝙶𝙴!* 🚨
-${readmore}
-𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]}
-𝚃𝙸𝙼𝙴 𝚂𝙴𝙽𝚃: ${xtipes}
-𝙳𝙰𝚃𝙴 𝚂𝙴𝙽𝚃: ${xdptes}
-𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}
-
-𝙼𝙴𝚂𝚂𝙰𝙶𝙴: ${text}`;
-
-            let quotedMessage = {
-                key: {
-                    remoteJid: chatId,
-                    fromMe: sender === Matrix.user.id,
-                    id: messageId,
-                    participant: sender
-                },
-                message: {
-                    conversation: text
-                }
-            };
-
-            await Matrix.sendMessage(
-                targetJid,
-                { text: replyText, mentions: [sender, deletedBy] },
-                { quoted: quotedMessage }
-            );
-        }
-
-    } catch (err) {
-        console.error("❌ Error processing deleted message:", err);
-    }
-}
-
-// ==================== END ANTI-DELETE HANDLER ====================
-
-      require('./system')(Matrix, m, chatUpdate, store); // This is for WhatsApp bot's system.js
+      // Process message with your system handler
+      const m = smsg(Matrix, msg, store);
+      require('./system')(Matrix, m, chatUpdate, store);
     }
   } catch (err) {
     console.error('Error handling messages.upsert:', err);
   }
 });
 
-Matrix.ev.on("messages.upsert", async (chatUpdate) => {
-    for (const msg of chatUpdate.messages) {
-        if (!msg.message) return;
-
-        let chatId = msg.key.remoteJid;
-        let messageId = msg.key.id;
-
-        saveStoredMessages(chatId, messageId, msg);
-    }
-});
-
+// Interval to clear old session files every 2 hours
 setInterval(() => {
   try {
     const sessionPath = path.join(__dirname, 'session');
@@ -948,53 +779,65 @@ setInterval(() => {
   }
 }, 7200000);
 
+// Interval to cleanup old messages every hour
 setInterval(cleanupOldMessages, 60 * 60 * 1000);
 
+// Ensure tmp folder exists
 function createTmpFolder() {
-const folderName = "tmp";
-const folderPath = path.join(__dirname, folderName);
+  const folderName = "tmp";
+  const folderPath = path.join(__dirname, folderName);
 
-if (!fs.existsSync(folderPath)) {
-fs.mkdirSync(folderPath);
-   }
- }
-
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath);
+  }
+}
 createTmpFolder();
 
+// Junk files cleanup every 30 seconds
 setInterval(() => {
-let directoryPath = path.join();
-fs.readdir(directoryPath, async function (err, files) {
-var filteredArray = await files.filter(item =>
-item.endsWith("gif") ||
-item.endsWith("png") ||
-item.endsWith("mp3") ||
-item.endsWith("mp4") ||
-item.endsWith("opus") ||
-item.endsWith("jpg") ||
-item.endsWith("webp") ||
-item.endsWith("webm") ||
-item.endsWith("zip")
-)
-if(filteredArray.length > 0){
-let teks =`Detected ${filteredArray.length} junk files,\nJunk files have been deleted🚮`
-Matrix.sendMessage(Matrix.user.id, {text : teks })
-setInterval(() => {
-if(filteredArray.length == 0) return console.log("Junk files cleared")
-filteredArray.forEach(function (file) {
-let sampah = fs.existsSync(file)
-if(sampah) fs.unlinkSync(file)
-})
-}, 15_000)
-}
-});
-}, 30_000)
+  let directoryPath = path.join();
+  fs.readdir(directoryPath, async function (err, files) {
+    if (err) {
+      console.error("Unable to scan directory:", err);
+      return;
+    }
 
+    var filteredArray = files.filter(item =>
+      item.endsWith("gif") ||
+      item.endsWith("png") ||
+      item.endsWith("mp3") ||
+      item.endsWith("mp4") ||
+      item.endsWith("opus") ||
+      item.endsWith("jpg") ||
+      item.endsWith("webp") ||
+      item.endsWith("webm") ||
+      item.endsWith("zip")
+    );
+
+    if (filteredArray.length > 0) {
+      let teks = `Detected ${filteredArray.length} junk files,\nJunk files have been deleted🚮`;
+      Matrix.sendMessage(Matrix.user.id, { text: teks });
+
+      setTimeout(() => {
+        filteredArray.forEach(function (file) {
+          let filePath = path.join(directoryPath, file);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        });
+        console.log("Junk files cleared");
+      }, 15_000);
+    }
+  });
+}, 30_000);
+
+// Decode JID helper function
 Matrix.decodeJid = (jid) => {
-if (!jid) return jid;
-if (/:\d+@/gi.test(jid)) {
-let decode = jidDecode(jid) || {};
-return (decode.user && decode.server && decode.user + "@" + decode.server) || jid;
-} else return jid;
+  if (!jid) return jid;
+  if (/:\d+@/gi.test(jid)) {
+    let decode = jidDecode(jid) || {};
+    return (decode.user && decode.server && decode.user + "@" + decode.server) || jid;
+  } else return jid;
 };
 
 Matrix.ev.on("contacts.update", (update) => {
@@ -1005,8 +848,15 @@ if (store && store.contacts) store.contacts[id] = { id, name: contact.notify };
 });
 
 Matrix.ev.on("group-participants.update", async ({ id: groupId, participants, action }) => {
-  // Check if welcome messages are enabled in the database settings
-  if (global.db.data.settings.welcome === true) {
+  // Get the current bot instance's JID
+  const botJid = Matrix.user.id;
+
+
+  const botInstanceSettings = global.db.data.users[botJid] || {}; // Ensure this is available.
+  const instanceWelcomeStatus = botInstanceSettings.welcome ?? global.db.data.settings.welcome ?? false; // Default to false
+
+  // Check if welcome messages are enabled for THIS bot instance
+  if (instanceWelcomeStatus === true) { // FIX: Use individual setting here
     try {
       // Fetch group metadata (name, participants, etc.)
       const groupMetadata = await Matrix.groupMetadata(groupId);
@@ -1018,7 +868,7 @@ Matrix.ev.on("group-participants.update", async ({ id: groupId, participants, ac
         // Get participant's profile picture
         const userPic = await getUserPicture(participant);
         // Get group's profile picture (not used here but fetched)
-        const groupPic = await getGroupPicture(groupId);
+        const groupPic = await getGroupPicture(groupId); // groupPic is defined but not used here, consistent with original.
 
         if (action === "add") {
           // Send welcome message when participant is added
@@ -1029,7 +879,7 @@ Matrix.ev.on("group-participants.update", async ({ id: groupId, participants, ac
         }
       }
     } catch (error) {
-      console.error(error);
+      console.error(`❌ Error in Welcome/Goodbye handler for group ${groupId}:`, error);
     }
   }
 });
@@ -1054,6 +904,7 @@ async function getGroupPicture(groupId) {
 async function sendWelcomeMessage(groupId, participant, groupName, memberCount, profilePic) {
   try {
     const userTag = `@${participant.split('@')[0]}`;
+    // timezones should be globally accessible in index.js, or passed/derived
     const joinTime = moment.tz(timezones).format('HH:mm:ss');
     const joinDate = moment.tz(timezones).format('DD/MM/YYYY');
 
@@ -1078,7 +929,7 @@ ${lineBottom}
 Stay awesome! 😊
 ${lineTop}
 
-> ${global.wm}`;
+> ${global.wm}`; // global.wm should be defined in settings.js
 
     await Matrix.sendMessage(groupId, {
       image: { url: profilePic },  // Send big photo
@@ -1094,7 +945,6 @@ ${lineTop}
 }
 
 
-
 async function sendGoodbyeMessage(groupId, participant, groupName, memberCount, profilePic) {
 const goodbyeMessage = `✨ *Goodbye @${participant.split('@')[0]}!* ✨
 
@@ -1104,24 +954,25 @@ We're now ${memberCount} members.
 
 Left at: ${moment.tz(timezones).format('HH:mm:ss')},  ${moment.tz(timezones).format('DD/MM/YYYY')}
 
-> ${global.wm}`;
+> ${global.wm}`; // global.wm should be defined in settings.js
 
   Matrix.sendMessage(groupId, {
     text: goodbyeMessage,
     contextInfo: {
       mentionedJid: [participant],
       externalAdReply: {
-        title: global.botname,
-        body: ownername,
+        title: global.botname, // global.botname should be defined in settings.js
+        body: ownername,      // ownername should be defined in settings.js
         previewType: 'PHOTO',
         thumbnailUrl: '',
-        thumbnail: await getBuffer(profilePic),
-        sourceUrl: plink
+        thumbnail: await getBuffer(profilePic), // getBuffer should be available in index.js scope
+        sourceUrl: plink     // plink should be defined in settings.js
       }
     }
   });
 }
 //------------------------------------------------------//
+
 
 Matrix.serializeM = (m) => smsg(Matrix, m, store)
 
@@ -1568,9 +1419,9 @@ Developer : @Matrixxxxxxxxx`;
 
 
     bot.on('message', async (XeonBotInc) => {
-        // Delegate complex Telegram command handling to matrixtele.js
+        // Delegate complex Telegram command handling to adiza.js
         // This is where commands like /listpair, /delpair, /pair, /runtime, /menu will be handled.
-        require("./matrixtele")(XeonBotInc, bot); // This line remains as per user's clarification
+        require("./adiza")(XeonBotInc, bot); // This line remains as per user's clarification
 
         const userId = XeonBotInc.from.id; // Get the user's ID
         await saveTelegramUser(userId); // Save the user ID

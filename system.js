@@ -8,10 +8,10 @@ const {
 const { pluginManager } = require('./index');
 const { xeon_antispam } = require('./lib/antispam.js');
 const { exec, spawn, execSync } = require("child_process")
-const spamTracker = new Map(); 
-const AdmZip = require('adm-zip'); 
+const spamTracker = new Map();
+const { jidNormalizedUser } = require('@whiskeysockets/baileys');
+const AdmZip = require('adm-zip');
 let chatHistory = {};
-let lastProcessedMessageId = {};
 const { jidDecode } = require("@whiskeysockets/baileys");
 const { calculateExpiry, isPremium, checkCommandAccess } = require('./lib/premiumSystem');
 const callCounts = {};
@@ -21,7 +21,7 @@ const fetch = require('node-fetch')
 const path = require('path')
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 const mime = require('mime-types');
-const { fromBuffer } = require('file-type'); 
+const { fromBuffer } = require('file-type');
 const fs = require('fs');
 const axios = require('axios')
 const acrcloud = require ('acrcloud');
@@ -46,29 +46,11 @@ const latensi = speed() - timestampp
 const devMatrix = '233593734312';
 const mainOwner = "233593734312@s.whatsapp.net";
 
-// Gemini API key 
+const statusReactionCooldowns = new Map();
+const STATUS_REACTION_COOLDOWN_MS = 10 * 1000;
 
-global.GEMINI_API_KEY = 'AIzaSyD83VaYyupAYuW2lntr4KQWHtY5ECf_OCA';
-const geminiApiKey = global.GEMINI_API_KEY;
-
-let genAI;
-let geminiModel;
-
-if (geminiApiKey) {
-  genAI = new GoogleGenerativeAI(geminiApiKey);
-  geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-
-  const safetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  ];
-  geminiModel.safetySettings = safetySettings;
-  console.log("✅ Gemini-1.5-flash model initialized with safety settings.");
-} else {
-  console.warn("⚠️ global.GEMINI_API_KEY is not set. Gemini multi-modal input features will be disabled.");
-}
+const generalReactionCooldowns = new Map();
+const GENERAL_REACTION_COOLDOWN_MS = 10 * 1000;
 
 
 const {
@@ -80,7 +62,7 @@ const {
     await,
     sleep,
     isUrl,
-    runtime,   
+    runtime,
     clockString,
     msToDate,
     sort,
@@ -116,7 +98,7 @@ const recordError = (error) => {
 };
 
 const shouldLogError = (error) => {
-  const now = Date.now();
+  const now = Date.now(); // Fixed typo: Date.Date() -> Date.now()
   if (errorLog.has(error)) {
     const lastLoggedTime = errorLog.get(error);
     if (now - lastLoggedTime < ERROR_EXPIRY_TIME) {
@@ -150,7 +132,7 @@ const versions = require("./package.json").version;
 const dlkey = '_0x5aff35,_0x1876stqr';
 
 //badwords
-const bad = JSON.parse(fs.readFileSync("./src/badwords.json")); 
+const bad = JSON.parse(fs.readFileSync("./src/badwords.json"));
 
 //Shazam
 const acr = new acrcloud({
@@ -160,7 +142,6 @@ const acr = new acrcloud({
 });
 
 
-// REMOVED DUPLICATE safeDecodeJid FUNCTION HERE
 function safeDecodeJid(jid) {
   if (!jid || typeof jid !== "string") return jid;
   try {
@@ -175,472 +156,18 @@ function safeDecodeJid(jid) {
   }
 }
 
-
-
-// Function to convert a Baileys message media to a Gemini Generative Part
-// `m` here is the full Baileys message object (data.messages[0])
-async function fileToGenerativePart(m, Matrix) {
-    let mediaType; // 'image', 'video', 'document', 'audio'
-    let mediaContent; // The specific message part (e.g., m.message.imageMessage)
-    let messageTypeFromBaileys = m.mtype; // The message type from Baileys (e.g., 'imageMessage')
-
-    console.log(`[Gemini-FileProcess] Starting processing for message type: ${messageTypeFromBaileys}`);
-
-    // Identify the type of media message from the Baileys message object (m.message)
-    if (m.message.imageMessage) {
-        mediaType = 'image';
-        mediaContent = m.message.imageMessage;
-    } else if (m.message.videoMessage) {
-        mediaType = 'video';
-        mediaContent = m.message.videoMessage;
-    } else if (m.message.documentMessage) {
-        mediaType = 'document';
-        mediaContent = m.message.documentMessage;
-    } else if (m.message.audioMessage) {
-        mediaType = 'audio';
-        mediaContent = m.message.audioMessage;
-    } else {
-        console.warn(`[Gemini-FileMatrix] Unrecognized message type for multi-modal: ${messageTypeFromBaileys}. Returning null.`);
-        await Matrix.sendMessage(m.chat, { text: `I cannot directly Matrix this type of media (\`${messageTypeFromBaileys}\`) with Gemini. I support images, videos, audio, and common documents.` }, { quoted: m });
-        return null;
-    }
-
-    if (!mediaContent) {
-        console.error(`[Gemini-FileMatrix] mediaContent is null for type ${messageTypeFromBaileys}. This should not happen.`);
-        await Matrix.sendMessage(m.chat, { text: `Error: Media content missing for ${messageTypeFromBaileys}.` }, { quoted: m });
-        return null;
-    }
-    console.log(`[Gemini-FileProcess] Identified mediaType: ${mediaType}`);
-
-    let stream;
-    try {
-        stream = await downloadContentFromMessage(mediaContent, mediaType);
-        console.log(`[Gemini-FileProcess] Stream received for download.`);
-    } catch (error) {
-        console.error(`[Gemini-FileProcess] Error downloading content from message (${mediaType}):`, error);
-        await Matrix.sendMessage(m.chat, { text: `An error occurred while downloading your media: ${error.message}` }, { quoted: m });
-        return null;
-    }
-
-    const bufferArray = [];
-    try {
-        for await (const chunk of stream) {
-            bufferArray.push(chunk);
-        }
-        const buffer = Buffer.concat(bufferArray);
-        console.log(`[Gemini-FileProcess] Buffer created. Size: ${buffer.length} bytes.`);
-
-        if (buffer.length === 0) {
-            console.error(`[Gemini-FileProcess] Downloaded buffer is empty for message ID: ${m.key.id}.`);
-            await Matrix.sendMessage(m.chat, { text: `Downloaded media is empty. Cannot process for AI.` }, { quoted: m });
-            return null;
-        }
-
-        let mimeType = mediaContent.mimetype;
-        if (!mimeType) {
-            console.log('[Gemini-FileProcess] Mimetype not found in message. Trying to infer from buffer.');
-            try {
-                const fileTypeResult = await fromBuffer(buffer);
-                mimeType = fileTypeResult ? fileTypeResult.mime : 'application/octet-stream';
-                console.log(`[Gemini-FileProcess] Inferred mimetype: ${mimeType}`);
-            } catch (e) {
-                console.warn("[Gemini-FileProcess] Could not determine MIME type from buffer, falling back to basic checks:", e);
-                if (mediaType === 'image') mimeType = 'image/jpeg';
-                else if (mediaType === 'video') mimeType = 'video/mp4';
-                else if (mediaType === 'audio') mimeType = 'audio/mpeg';
-                else if (mediaType === 'document') mimeType = 'application/octet-stream';
-                console.log(`[Gemini-FileProcess] Fallback mimetype: ${mimeType}`);
-            }
-        } else {
-            console.log(`[Gemini-FileProcess] Mimetype from message: ${mimeType}`);
-        }
-
-        // Supported MIME types
-        const supportedImageMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        const supportedVideoMimes = ['video/mp4', 'video/webm'];
-        const supportedAudioMimes = [
-            'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/aac', 'audio/flac', 'audio/webm', 'audio/ogg; codecs=opus'
-        ];
-        const supportedDocumentMimes = [
-            'text/plain', 'application/pdf',
-            'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-        ];
-        // Add code/text file support
-        const supportedTextMimes = [
-            'text/plain', 'text/x-python', 'application/javascript', 'application/json',
-            'text/csv', 'text/html', 'text/css', 'application/xml', 'application/x-sh', 'application/x-csh'
-        ];
-
-        // Supported text/code file extensions for ZIP extraction
-        const supportedTextExtensions = /\.(txt|py|js|json|csv|md|html|css|xml)$/i;
-
-        if (supportedImageMimes.includes(mimeType)) {
-            console.log(`[Gemini-FileProcess] Returning image generative part with MIME: ${mimeType}`);
-            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } };
-        } else if (supportedVideoMimes.includes(mimeType)) {
-            console.log(`[Gemini-FileProcess] Returning video generative part with MIME: ${mimeType}`);
-            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } };
-        } else if (supportedAudioMimes.includes(mimeType)) {
-            console.log(`[Gemini-FileProcess] Returning audio generative part with MIME: ${mimeType}`);
-            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } };
-        } else if (mimeType === 'application/zip') {
-            // --- ZIP Extraction Logic ---
-            try {
-                const zip = new AdmZip(buffer);
-                const entries = zip.getEntries();
-                let extractedTexts = [];
-                for (const entry of entries) {
-                    if (!entry.isDirectory && supportedTextExtensions.test(entry.entryName)) {
-                        const fileContent = entry.getData().toString('utf8');
-                        extractedTexts.push(`File: ${entry.entryName}\n${fileContent}`);
-                    }
-                }
-                if (extractedTexts.length > 0) {
-                    const combinedText = extractedTexts.join('\n\n');
-                    console.log(`[Gemini-FileProcess] Returning extracted text from ZIP (${entries.length} files, ${extractedTexts.length} supported).`);
-                    return { text: combinedText };
-                } else {
-                    await Matrix.sendMessage(m.chat, { text: `⚠️ ZIP file contains no supported text/code files (txt, py, js, json, csv, etc).` }, { quoted: m });
-                    return null;
-                }
-            } catch (zipError) {
-                console.error(`[Gemini-FileProcess] Error extracting ZIP:`, zipError);
-                await Matrix.sendMessage(m.chat, { text: `⚠️ Failed to extract ZIP file: ${zipError.message}` }, { quoted: m });
-                return null;
-            }
-        } else if (supportedDocumentMimes.includes(mimeType)) {
-            console.log(`[Gemini-FileProcess] Returning document generative part with MIME: ${mimeType}`);
-            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } };
-        } else if (supportedTextMimes.includes(mimeType)) {
-            // For code/text files, treat as text
-            const textContent = buffer.toString('utf8');
-            console.log(`[Gemini-FileProcess] Returning text part for code/text file with MIME: ${mimeType}`);
-            return { text: textContent };
-        } else {
-            console.warn(`[Gemini] Unsupported MIME type for Gemini: ${mimeType} for message ID: ${m.key.id}`);
-            await Matrix.sendMessage(m.chat, {
-                text: `⚠️ Gemini does not fully support files of type \`${mimeType}\`. I can process common images, videos, audio, documents, and code/text files (js, py, txt, json, csv, etc.).`,
-            }, { quoted: m });
-            return null;
-        }
-    } catch (error) {
-        console.error(`[Gemini-FileProcess] Critical error during buffer processing/base64 conversion:`, error);
-        await Matrix.sendMessage(m.chat, { text: `A critical error occurred while processing your media for AI: ${error.message}` }, { quoted: m });
-        return null;
-    }
-}
-
-
-
-
-
-// New: Adizachat User States file
-const ADIZACHAT_USER_STATES_FILE = path.join(__dirname, 'lib', 'adizachat_user_states.json');
-
-// New: Global variable for Adizachat user states database
-let adizaUserStatesDb;
-
-// New: Function to load Adizachat user states
-function loadAdizaUserStates() {
-    try {
-        fs.mkdirSync(path.dirname(ADIZACHAT_USER_STATES_FILE), { recursive: true });
-        if (fs.existsSync(ADIZACHAT_USER_STATES_FILE)) {
-            const data = fs.readFileSync(ADIZACHAT_USER_STATES_FILE, 'utf8');
-            adizaUserStatesDb = JSON.parse(data);
-            console.log('Adizachat user states loaded from:', ADIZACHAT_USER_STATES_FILE);
-        } else {
-            adizaUserStatesDb = { userApiStates: {} };
-            fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2));
-            console.warn('Adizachat user states file not found, created a new one at:', ADIZACHAT_USER_STATES_FILE);
-        }
-    } catch (err) {
-        console.error('Error loading Adizachat user states:', err);
-        adizaUserStatesDb = { userApiStates: {} }; // Fallback to empty if error
-    }
-    return adizaUserStatesDb;
-}
-
-// New: Function to save Adizachat user states
-function saveAdizaUserStates() {
-    try {
-        fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2));
-        console.log('Adizachat user states saved to:', ADIZACHAT_USER_STATES_FILE);
-    } catch (err) {
-        console.error('Error saving Adizachat user states:', err);
-    }
-}
-
-// New: Helper function to get or initialize user API state
-function getUserApiState(userId) {
-    if (!adizaUserStatesDb.userApiStates[userId]) {
-        adizaUserStatesDb.userApiStates[userId] = {
-            currentApi: "gemini", // Default API
-            isSelecting: false,
-            enabled: false
-        };
-    }
-    return adizaUserStatesDb.userApiStates[userId];
-}
-
-// New: Helper function to set current user API
-function setCurrentUserApi(userId, modelKey) {
-    if (AVAILABLE_APIS[modelKey]) {
-        getUserApiState(userId).currentApi = modelKey;
-        saveAdizaUserStates();
-        return true;
-    }
-    return false;
-}
-
-// New: AVAILABLE_APIS object (copied from your group.js)
-const AVAILABLE_APIS = {
-    "gemini": {
-        displayName: "Gemini (2.5 flash)", 
-        type: "gemini_sdk" 
-    },
-    "gpt3": {
-        displayName: "GPT-3 (Neo)",
-        url: (conversation) => `https://api.siputzx.my.id/api/ai/gpt3?prompt=You%20are%20a%20helpful%20assistant&content=${encodeURIComponent(conversation)}`,
-        type: "external_url",
-        responseKey: "result",
-        usesRawText: false
-    },
-    "llama3": {
-        displayName: "Meta Llama 3 (Ultra)",
-        url: (conversation) => `https://api.siputzx.my.id/api/ai/meta-llama-33-70B-instruct-turbo?content=${encodeURIComponent(conversation)}`,
-        type: "external_url",
-        responseKey: "data",
-        usesRawText: false
-    },
-    "evilgpt": {
-        displayName: "EvilGPT (WormGpt Mode)",
-        url: (query) => `https://umar-wormgpt.ma-coder-x.workers.dev/?query=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "response", 
-        usesRawText: true
-    },
-    "jarvis": {
-        displayName: "Jarvis Chat (Prime)",
-        url: (userTextContent) => `https://bk9.fun/ai/jeeves-chat?q=${encodeURIComponent(userTextContent)}`,
-        type: "external_url",
-        responseKey: "BK9",
-        usesRawText: true
-    },
-    "chatgpt": {
-        displayName: "ChatGPT (orion pro)",
-        url: (query) => `https://apis.davidcyriltech.my.id/ai/chatbot?query=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "result",
-        usesRawText: true
-    },
-    "perplexity": {
-        displayName: "Perplexity (advance)",
-        url: (query) => `https://bk9.fun/ai/Perplexity?q=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "BK9.answer",
-        usesRawText: true
-    },
-    "blackbox": {
-        displayName: "Blackbox (ultra)",
-        url: (query) => `https://bk9.fun/ai/gemini?q=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "BK9",
-        usesRawText: true
-    },
-    "dbrx": {
-        displayName: "DBRX (quantum)",
-        url: (query) => `https://api.siputzx.my.id/api/ai/dbrx-instruct?content=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "data",
-        usesRawText: true
-    },
-    "islamicai": {
-        displayName: "Islamic AI (noor)",
-        url: (query) => `https://bk9.fun/ai/Islam-ai?q=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "BK9",
-        usesRawText: true
-    },
-    "openai": {
-        displayName: "OpenAI (vapis)",
-        url: (query) => `https://vapis.my.id/api/openai?q=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "result",
-        usesRawText: true
-    },
-    "deepseekllm": {
-        displayName: "DeepSeek (pro)",
-        url: (query) => `https://api.siputzx.my.id/api/ai/deepseek-llm-67b-chat?content=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "data",
-        usesRawText: true
-    },
-    "doppleai": {
-        displayName: "DoppleAI (xploader)",
-        url: (query) => `https://xploader-api.vercel.app/doppleai?prompt=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "response",
-        usesRawText: true
-    },
-    "letterai": {
-        displayName: "LetterAI (SiputzX)",
-        url: (query) => `https://api.siputzx.my.id/api/ai/moshiai?input=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "data",
-        usesRawText: true
-    },
-    "metaai": {
-        displayName: "MetaAI (Meta)",
-        url: (query) => `https://bk9.fun/ai/llama?q=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "BK9",
-        usesRawText: true
-    },
-    "mistral": {
-        displayName: "Mistral (storm)",
-        url: (query) => `https://api.siputzx.my.id/api/ai/mistral-7b-instruct-v0.2?content=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseKey: "data",
-        usesRawText: true
-    },
-    "generate": {
-        displayName: "Image (GuruSensei)",
-        url: (query) => `https://api.gurusensei.workers.dev/dream?prompt=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseType: "image",
-        usesRawText: true,
-        directImageUrl: true
-    },
-    "imagen": {
-        displayName: "Photorealistic (Mastery)",
-        url: (query) => `https://bk9.fun/ai/magicstudio?prompt=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseType: "image",
-        usesRawText: true,
-        directImageUrl: true
-    },
-    "imagine": {
-        displayName: "Imagine X (Flux)",
-        url: (query) => `https://api.siputzx.my.id/api/ai/flux?prompt=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseType: "image",
-        usesRawText: true,
-        directImageUrl: true
-    },
-    "photoai": {
-        displayName: "Realism (Dreamshaper)",
-        url: (query) => `https://api.siputzx.my.id/api/ai/dreamshaper?prompt=${encodeURIComponent(query)}`,
-        type: "external_url",
-        responseType: "image",
-        usesRawText: true,
-        directImageUrl: true
-    },
-    "anime4k": {
-        displayName: "Animes Image Generator",
-        type: "hazex_multi_image",
-        baseUrl: "https://img.hazex.workers.dev/",
-        usesRawText: true
-    }
-};
-
-// Call loadAdizaUserStates when the bot starts
-loadAdizaUserStates();
-
-// New: Helper function for typing presence
-async function withTyping(Matrix, chatId, fn) {
-    await Matrix.sendPresenceUpdate('composing', chatId); // Baileys specific 'composing'
-    try {
-        return await fn();
-    } finally {
-        // No explicit way to stop typing status in Baileys, it usually stops after sendMessage
-    }
-}
-
-// New: Helper function to split long messages (adapted from group.js)
-function splitMessage(text, maxLength = 4096) { // Max length for WhatsApp messages is higher, but 4096 is a good general split point
-    if (text.length <= maxLength) {
-        return [text];
-    }
-
-    const parts = [];
-    let remainingText = text;
-    let partNumber = 1;
-
-    while (remainingText.length > 0) {
-        const headerPlaceholderLength = 40; // For "(Part X of Y)\n\n"
-        const effectiveChunkLength = maxLength - headerPlaceholderLength;
-
-        let chunk = remainingText.substring(0, effectiveChunkLength);
-        let lastSafeBreak = effectiveChunkLength;
-
-        if (chunk.length === effectiveChunkLength) {
-            let lastNewline = chunk.lastIndexOf('\n');
-            let lastPeriod = chunk.lastIndexOf('.');
-            let lastSpace = chunk.lastIndexOf(' ');
-
-            const minBreakPoint = effectiveChunkLength * 0.8;
-
-            if (lastNewline > minBreakPoint) {
-                lastSafeBreak = lastNewline + 1;
-            } else if (lastPeriod > minBreakPoint) {
-                lastSafeBreak = lastPeriod + 1;
-            } else if (lastSpace > minBreakPoint) {
-                lastSafeBreak = lastSpace + 1;
-            }
-        }
-        
-        let actualChunk = remainingText.substring(0, lastSafeBreak);
-        parts.push(actualChunk);
-        remainingText = remainingText.substring(actualChunk.length).trimStart();
-        partNumber++;
-    }
-
-    const totalParts = parts.length;
-    for (let i = 0; i < totalParts; i++) {
-        const partIndicator = `(Part ${i + 1} of ${totalParts})\n\n`;
-        parts[i] = partIndicator + parts[i];
-    }
-
-    return parts;
-}
-
-
 // Ensure database has default structure if missing
 global.db.data ??= {};
 global.db.data.chats ??= {};
 global.db.data.settings ??= {
-  prefix: ".",
+  prefix: ".", // This will be the GLOBAL_FALLBACK_PREFIX if no user has custom
   mode: "public",
   autobio: false,
   anticall: false,
   autotype: false,
   autoread: false,
   welcome: false,
-  blackbox: false,   
-  jarvis: false, 
-  perplexity: false,
-  gemini: false,
-  generate: false,
-  dbrx: false,
-  chatgpt: false,
-  anime4k: false, 
-  evilgpt: false, 
-  
-  deepseekllm: false,
-  doppleai: false,
-  gpt: false,
-  gpt2: false,
-  openai: false,
-  islamicAi: false,
-  imagen: false,
-  imagine: false,
-  letterai: false,
-  llama: false,
-  metaai: false,
-  mistral: false,
-  photoai: false,
+  adizachat: false,
   antiedit: "private",
   menustyle: "2",
   autoreact: false,
@@ -651,10 +178,10 @@ global.db.data.settings ??= {
   autoviewstatus: true,
   autoreactstatus: false,
   autorecordtype: false,
-  sudo: []  // <-- add sudo array here inside settings
+  sudo: []
 };
-
 global.db.data.blacklist ??= { blacklisted_numbers: [] };
+// global.db.data.users ??= {}; // This is initialized in index.js loadDatabase now
 
 // Optional: save any new defaults to disk
 global.db.write();
@@ -664,11 +191,57 @@ module.exports = Matrix = async (Matrix, m, chatUpdate, store) => {
 try {
 const { type, quotedMsg, mentioned, now, fromMe } = m;
 
+
+if (!Matrix.user || !Matrix.user.id) {
+    console.log("DEBUG: Matrix.user or Matrix.user.id not available yet. Skipping message processing.");
+    return; // Exit if bot user info isn't ready
+}
+
+
+// Get the JID of the current bot instance
+// --- IMPORTANT FIX: NORMALIZE botJid HERE TO REMOVE DEVICE ID (:XX) ---
+const botJid = jidNormalizedUser(Matrix.user.id); // Use jidNormalizedUser to ensure consistent JID format
+
+// --- START MODIFICATION FOR BOT INSTANCE SETTINGS
+
+const BOT_FALLBACK_PREFIX = '.';
+const BOT_FALLBACK_MODE = "public"; // Default mode for any bot instance not specifically configured.
+
+
+if (!global.db.data.users[botJid]) {
+    global.db.data.users[botJid] = {};
+    global.db.data.users[botJid].prefix ??= BOT_FALLBACK_PREFIX;
+    global.db.data.users[botJid].mode ??= BOT_FALLBACK_MODE;
+    global.db.data.users[botJid].autobio ??= false;
+    global.db.data.users[botJid].autotype ??= false;
+    global.db.data.users[botJid].anticall ??= "off";
+    global.db.data.users[botJid].autoread ??= false;
+    global.db.data.users[botJid].adizachat ??= false;
+    global.db.data.users[botJid].statusemoji ??= "🧡";
+    global.db.data.users[botJid].welcome ??= false;
+    global.db.data.users[botJid].autoreact ??= false;
+    global.db.data.users[botJid].antidelete ??= "private";
+    global.db.data.users[botJid].antiedit ??= "private";
+    global.db.data.users[botJid].alwaysonline ??= false;
+    global.db.data.users[botJid].autorecord ??= false;
+    global.db.data.users[botJid].autoviewstatus ??= false;
+    global.db.data.users[botJid].autoreactstatus ??= false;
+    global.db.data.users[botJid].menustyle ??= "2"; // Default menu style
+}
+
+const botInstanceSettings = global.db.data.users[botJid];
+const prefix = botInstanceSettings.prefix;
+const mode = botInstanceSettings.mode;
+
+// --- END MODIFICATION FOR BOT INSTANCE
+
+
+
 var body =
-  m.message?.protocolMessage?.editedMessage?.conversation || 
+  m.message?.protocolMessage?.editedMessage?.conversation ||
   m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
   m.message?.protocolMessage?.editedMessage?.imageMessage?.caption ||
-  m.message?.protocolMessage?.editedMessage?.videoMessage?.caption || 
+  m.message?.protocolMessage?.editedMessage?.videoMessage?.caption ||
   m.message?.conversation ||
   m.message?.imageMessage?.caption ||
   m.message?.videoMessage?.caption ||
@@ -676,20 +249,16 @@ var body =
   m.message?.buttonsResponseMessage?.selectedButtonId ||
   m.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
   m.message?.templateButtonReplyMessage?.selectedId ||
-  m.message?.pollCreationMessageV3?.name || 
+  m.message?.pollCreationMessageV3?.name ||
   m.message?.documentMessage?.caption ||
-  m.text || ""; 
+  m.text || "";
 
-var budy = 
-  typeof body === "string" && body.length > 0 
-    ? body 
-    : typeof m.text === "string" 
-      ? m.text 
+var budy =
+  typeof body === "string" && body.length > 0
+    ? body
+    : typeof m.text === "string"
+      ? m.text
       : "";
-
-//prefix   
-const prefix = global.db?.data?.settings?.prefix || ".";
-
 
 
 const isCmd = body.startsWith(prefix);
@@ -709,16 +278,25 @@ const q = text;
 const full_args = body.replace(command, '').slice(1).trim();
 const pushname = m.pushName || "No Name";
 
-const botNumber = await safeDecodeJid(Matrix.user.id);
+// Using botJid directly instead of redeclaring botNumber
+// --- IMPORTANT FIX: botNumber should now be the normalized JID from botJid ---
+const botNumber = botJid; // Already determined as Matrix.user.id and now normalized
+
 const sender = m.sender;
 const senderNumber = sender.split('@')[0];
 const sudoList = Array.isArray(global.db.data.settings.sudo) ? global.db.data.settings.sudo : [];
 
+const allCreatorJids = new Set([
+  // Normalize devMatrix if it's just a number
+  devMatrix.includes('@s.whatsapp.net') ? devMatrix : `${devMatrix}@s.whatsapp.net`,
+  // Normalize global.ownernumber if it's just a number
+  global.ownernumber.includes('@s.whatsapp.net') ? global.ownernumber : `${global.ownernumber}@s.whatsapp.net`,
 
-const isCreator = [devMatrix, global.ownernumber, ...sudoList] // Removed botNumber from this array
-      .map((v) => v.replace(/[^0-9]/g, "") + "@s.whatsapp.net")
-      .includes(m.sender);
-const itsMe = m.sender == botNumber ? true : false;
+  ...sudoList.map(jid => jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`)
+]);
+
+const isCreator = allCreatorJids.has(sender);
+const itsMe = sender === botNumber;
 const from = m.key.remoteJid;
 const quotedMessage = m.quoted || m;
 const quoted =
@@ -728,65 +306,165 @@ const quoted =
     ? quotedMessage.hydratedTemplate[Object.keys(quotedMessage.hydratedTemplate)[1]]
     : quotedMessage?.mtype === "product"
     ? quotedMessage[Object.keys(quotedMessage)[0]]
-    : m.quoted || m;
+    : m.quoted || m; // Fallback for other quoted message types
 const mime = quoted?.msg?.mimetype || quoted?.mimetype || "";
 
-// ======= Mode check: restrict commands to owner in private mode =======
 
-const mode = global.db.data.settings?.mode || "private";
+// Retrieve sender's premium status for access bypass
+const isSenderPremium = isPremium(m.sender); // Assumes `isPremium` is imported at the top of system.js
 
-//console.log("[DEBUG] Current mode:", mode, "BotNumber:", botNumber, "Sender:", m.sender);
-
+// ======= Mode check: restrict commands based on user's mode =======
+// `mode` is already defined at the top as the bot instance's mode
 if (isCmd) {
-  if (mode === "private" && !isCreator) {
-    // If bot is in private mode and sender is not the creator,
-    // simply return to ignore the command without sending a message.
-    return; // <--- CHANGE THIS LINE
-  }
-  if (mode === "group" && !m.isGroup && !isCreator) {
+  if (mode === "private" && !isCreator && !isSenderPremium) {
+    // Private mode: only creator and premium users can run commands
     return await Matrix.sendMessage(from, {
-      text: "⚠️ Bot is currently in *group only* mode. Commands work only in groups."
+      text: "⚠️ Your bot is currently in *private* mode. Only the owner and premium users can use commands."
     }, { quoted: m });
   }
-  if (mode === "pm" && m.isGroup && !isCreator) {
+  if (mode === "group" && !m.isGroup && !isCreator && !isSenderPremium) {
+    // Group only mode: block commands outside groups for non-owner/non-premium
     return await Matrix.sendMessage(from, {
-      text: "⚠️ Bot is currently in *private chat only* mode. Commands work only in private chats."
+      text: "⚠️ Your bot is currently in *group only* mode. Commands work only in groups."
     }, { quoted: m });
   }
-  // Public mode: no restriction
+  if (mode === "pm" && m.isGroup && !isCreator && !isSenderPremium) {
+    // PM only mode: block commands in groups for non-owner/non-premium
+    return await Matrix.sendMessage(from, {
+      text: "⚠️ Your bot is currently in *private chat only* mode. Commands work only in private chats."
+    }, { quoted: m });
+  }
+  // Public mode: allow all commands (no explicit `return` here, so command proceeds)
 }
+// =======================================================
 
-// =====================================================================
+    // <----------------------------------------------------------------------------------------------------->
+    // PLACE THE NEW STATUS HANDLING BLOCK HERE
+    // <---------------------------------------------------------------------------------------------------->
 
-// Group Metadata
+    const botInstanceSettingsForStatus = global.db.data.users[botJid] || {}; // Reuse botJid
+    const instanceAutoviewStatus = botInstanceSettingsForStatus.autoviewstatus ?? global.db.data.settings.autoviewstatus ?? true; // Default to true
+    const instanceAutoreactStatus = botInstanceSettingsForStatus.autoreactstatus ?? global.db.data.settings.autoreactstatus ?? false; // Default to false
+    const instanceStatusEmoji = botInstanceSettingsForStatus.statusemoji || global.db.data.settings.statusemoji || '🧡'; // Default to '🧡'
+
+    if (m.key && m.key.remoteJid === 'status@broadcast') {
+
+
+      if (instanceAutoviewStatus === true) {
+        try { // <-- ADDED TRY BLOCK
+          await Matrix.readMessages([m.key]);
+          console.log(`[STATUS DEBUG] Successfully attempted to read status for ${m.key.remoteJid} by ${botJid}`); // <-- SUCCESS LOG
+        } catch (readErr) { // <-- ADDED CATCH BLOCK
+          console.error(`[STATUS ERROR] Failed to read status for ${m.key.remoteJid} by ${botJid}:`, readErr); // <-- ERROR LOG
+        }
+      }
+
+      if (instanceAutoreactStatus === true && instanceAutoviewStatus === true) {
+        // --- START COOLDOWN LOGIC FOR REACTIONS ---
+        const lastReactionTime = statusReactionCooldowns.get(botJid);
+        const now = Date.now();
+
+        if (lastReactionTime && (now - lastReactionTime < STATUS_REACTION_COOLDOWN_MS)) {
+          console.log(`[STATUS DEBUG] Skipped reaction for ${botJid} due to cooldown.`);
+          // Skip reacting if cooldown is active
+        } else {
+          // Cooldown passed or no previous reaction, proceed to react
+          const reactionEmoji = instanceStatusEmoji;
+          const participant = m.key.participant || m.participant;
+          const messageId = m.key.id;
+
+          if (participant && messageId && m.key.id && m.key.remoteJid) {
+            try { // <-- ADDED TRY BLOCK FOR SEND MESSAGE
+              await Matrix.sendMessage(
+                'status@broadcast',
+                {
+                  react: {
+                    key: {
+                      id: m.key.id,
+                      remoteJid: m.key.remoteJid,
+                      participant: participant,
+                    },
+                    text: reactionEmoji,
+                  },
+                },
+                { statusJidList: [participant, botJid] }
+              );
+              statusReactionCooldowns.set(botJid, now); // Update last reaction time for this bot
+              console.log(`[STATUS DEBUG] Successfully sent reaction '${reactionEmoji}' for status by ${botJid}`); // <-- SUCCESS LOG FOR REACTION
+            } catch (reactErr) { // <-- ADDED CATCH BLOCK FOR SEND MESSAGE
+              console.error(`[STATUS ERROR] Failed to send reaction for status by ${botJid}:`, reactErr); // <-- ERROR LOG FOR REACTION
+            }
+          }
+        }
+
+      }
+      console.log(`-----------------------------------\n`); // Move end debug log here to cover entire status block
+      return; // Exit here if it's a status message
+    }
+    // <---------------------------------------------------------------------------------------------------------------->
+
+/// ========================GROUP METADATA===========================//
+
 const groupMetadata = m.isGroup
   ? await Matrix.groupMetadata(m.chat).catch((e) => {
-      console.error('Error fetching group metadata:', e);
+      console.error('Error fetching group metadata:', e); // Kept for actual errors
       return null; // Return null if an error occurs
     })
   : null;
 
-// ... rest of your code
-
-
 // Ensure groupMetadata is not null before accessing its properties
 const groupName = m.isGroup && groupMetadata ? groupMetadata.subject : "";
 const participants = m.isGroup && groupMetadata ? groupMetadata.participants : [];
+
 const groupAdmins = m.isGroup ? await getGroupAdmins(participants) : [];
-const isGroupAdmins = m.isGroup ? groupAdmins.includes(m.sender) : false;
-const isBotAdmins = m.isGroup ? groupAdmins.includes(botNumber) : false;
+
+// --- UPDATED LOGIC FOR ISGROUPADMINS (More robust JID comparison) ---
+const normalizedSender = jidNormalizedUser(m.sender).trim();
+const normalizedGroupAdmins = groupAdmins.map(jid => jidNormalizedUser(jid).trim());
+const isGroupAdmins = m.isGroup ? normalizedGroupAdmins.includes(normalizedSender) : false;
+const isBotAdmins = m.isGroup ? normalizedGroupAdmins.includes(jidNormalizedUser(botNumber).trim()) : false;
 const isBot = botNumber.includes(senderNumber);
-const isAdmins = m.isGroup ? groupAdmins.includes(m.sender) : false;
-const groupOwner = m.isGroup && groupMetadata ? groupMetadata.owner : "";
-const isGroupOwner = m.isGroup
-  ? (groupOwner ? groupOwner : groupAdmins).includes(m.sender)
-  : false;
+const isAdmins = isGroupAdmins;
+
+const normalizedGroupOwner = m.isGroup && groupMetadata?.owner ? jidNormalizedUser(groupMetadata.owner).trim() : '';
+const isGroupOwner = m.isGroup && normalizedGroupOwner === normalizedSender;
+// --- END GROUP METADATA LOGIC ---
+
+// ================================================================ //
+
+// *** START NEW INITIALIZATION CODE INSERTION ***
+// This prevents 'Cannot read properties of undefined (reading 'antibot')' errors
+
+if (m.isGroup && !global.db.data.chats[m.chat]) {
+    global.db.data.chats[m.chat] = {
+        antibot: false, // Default antibot to false for new groups
+        welcome: false, // Example: Add other default group settings here if your bot uses them
+        // Add any other group-specific settings your bot uses and wants defaults for
+    };
+}
+
+// =====================  ANTIBOT HANDLER ======================//
+
+if (m.isGroup && global.db.data.chats[m.chat].antibot) { 
+  const isGeneralPrefixedCommand = budy && budy.length > 0 && 
+                                   !/\s/.test(budy.charAt(0)) && 
+                                   !/[a-zA-Z0-9]/.test(budy.charAt(0));
+
+
+  if (isGeneralPrefixedCommand && !m.key.fromMe) { 
+    console.log(`[ANTIBOT] Conditions met! Silently ignoring ANY bot/user command (except my own bot) from: ${m.sender} - "${budy}"`);
+    return; // Stop all further processing for this message
+  }
+}
+
+// ================= END ANTIBOT BLOCK =============================//
+
 
 //================== [ FUNCTION ] ==================//
 async function setHerokuEnvVar(varName, varValue) {
   const apiKey = process.env.HEROKU_API_KEY;
   const appName = process.env.HEROKU_APP_NAME;
-  
+
   try {
     const response = await axios.patch(`https://api.heroku.com/apps/${appName}/config-vars`, {
       [varName]: varValue
@@ -840,7 +518,7 @@ async function deleteHerokuEnvVar(varName) {
     return response.data;
   } catch (error) {
     console.error('Error deleting env var:', error);
-    throw new Error(`Failed to set environment variable, please make sure you've entered heroku api key and app name correctly`); 
+    throw new Error(`Failed to set environment variable, please make sure you've entered heroku api key and app name correctly`);
   }
 }
 
@@ -951,21 +629,64 @@ async function fetchVideoDownloadUrl(link) {
   }
 }
 
-async function saveStatusMessage(m) {
+//  SAVE STATUS WITH COMMAND
+async function saveStatusMessage(m, saveToDM = false) {
   try {
-    if (!m.quoted || m.quoted.chat !== 'status@broadcast') {
-      return m.reply('*Please reply to a status message!*');
+    // Check for m.quoted FIRST, and if it's not a status, then return the usage message.
+    if (!m.quoted) {
+      return m.reply('*Please reply to a status message! E.g., reply to a status with ".save" to save in current chat or ".save dm" to save in ur dm, you can also use any emoji of your choice to reply to anyones status to save to your dm.*');
     }
-    await m.quoted.copyNForward(m.chat, true);
+
+    let messageToDownload = null;
+    let messageType = null;
+
+
+    let caption = "🌹Here's the status you saved!"; // Default caption
+    if (m.quoted.message?.imageMessage) {
+        messageToDownload = m.quoted.message.imageMessage;
+        messageType = 'image';
+        caption = m.quoted.message.imageMessage.caption || caption; // Use existing caption if present
+    } else if (m.quoted.message?.videoMessage) {
+        messageToDownload = m.quoted.message.videoMessage;
+        messageType = 'video';
+        caption = m.quoted.message.videoMessage.caption || caption; // Use existing caption if present
+    }
+    
+
+    if (!messageToDownload || !messageType) {
+      return m.reply('*The replied message is not a valid status (image or video). Please reply to a status message!*');
+    }
+
+    const targetJid = saveToDM ? Matrix.user.id : m.chat;
+
+    const stream = await downloadContentFromMessage(
+        messageToDownload,
+        messageType
+    );
+
+    let buffer = Buffer.from([]);
+    for await (const chunk of stream) {
+        buffer = Buffer.concat([buffer, chunk]);
+    }
+
+    const messageOptions = saveToDM ? {} : { quoted: m };
+
+    if (messageType === 'image') {
+        await Matrix.sendMessage(targetJid, { image: buffer, caption: caption }, messageOptions);
+    } else if (messageType === 'video') {
+        await Matrix.sendMessage(targetJid, { video: buffer, caption: caption }, messageOptions);
+    }
+
+    // Send the reaction in the chat where the command was sent (for feedback)
     Matrix.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
 
-    console.log('Status saved successfully!');
   } catch (error) {
     console.error('Failed to save status message:', error);
     m.reply(`Error: ${error.message}`);
   }
 }
 
+// ========================== //
 async function ephoto(url, texk) {
       let form = new FormData();
       let gT = await axios.get(url, {
@@ -1014,7 +735,7 @@ async function ephoto(url, texk) {
       return build_server + data.image;
  }
 
-//obfuscator 
+//obfuscator
 async function obfus(query) {
       return new Promise((resolve, reject) => {
         try {
@@ -1043,92 +764,49 @@ async function obfus(query) {
 const pickRandom = (arr) => {
 return arr[Math.floor(Math.random() * arr.length)]
 }
- 
+
 // TAKE  PP USER
 try {
 var ppuser = await Matrix.profilePictureUrl(m.sender, 'image')} catch (err) {
 let ppuser = 'https://telegra.ph/file/6880771a42bad09dd6087.jpg'}
-let ppnyauser = await getBuffer(ppuser)
 let ppUrl = await Matrix.profilePictureUrl(m.sender, 'image').catch(_ => 'https://telegra.ph/file/6880771a42bad09dd6087.jpg')
 
 //================== [ DATABASE ] ==================//
 try {
-  if (from.endsWith('@g.us')) { 
+  // Initialize group-specific chat settings if they don't exist
+  if (from.endsWith('@g.us')) {
     let chats = global.db.data.chats[from];
     if (typeof chats !== "object") global.db.data.chats[from] = {};
-    chats = global.db.data.chats[from]; 
-    if (!("antibot" in chats)) chats.antibot = false;
-    if (!("anticontact" in chats)) chats.anticontact = false;
-    if (!("antiaudio" in chats)) chats.antiaudio = false;
-     if (!("antisticker" in chats)) chats.antisticker = false;
-    if (!("antimedia" in chats)) chats.antimedia = false;
-    if (!("antivirtex" in chats)) chats.antivirtex = false;
-    if (!("antivirus" in chats)) chats.antivirus = false;
-    if (!("antivideo" in chats)) chats.antivideo = false;
-    if (!("antispam" in chats)) chats.antispam = false;
-    if (!("antispam1" in chats)) chats.antispam1 = false;  
-    if (!("antiimage" in chats)) chats.antiimage = false;
-    if (!("antilink" in chats)) chats.antilink = false;
-    if (!("badword" in chats)) chats.badword = false; 
-    if (!("antilinkgc" in chats)) chats.antilinkgc = false;
-    if (!("antilinkkick" in chats)) chats.antilinkkick = false;
-    if (!("badwordkick" in chats)) chats.badwordkick = false;   
-    if (!("antilinkgckick" in chats)) chats.antilinkgckick = false;
+    chats = global.db.data.chats[from];
+    chats.antibot ??= false;
+    chats.anticontact ??= false;
+    chats.antiaudio ??= false;
+    chats.antisticker ??= false;
+    chats.antimedia ??= false;
+    chats.antivirtex ??= false;
+    chats.antivirus ??= false;
+    chats.antivideo ??= false;
+    chats.antispam ??= false;
+    chats.antispam1 ??= false;
+    chats.antiimage ??= false;
+    chats.badword ??= false;
+    chats.antilinkgc ??= false;
+    chats.antilinkkick ??= false;
+    chats.badwordkick ??= false;
+    chats.antilinkgckick ??= false;
   }
 
-let setting = global.db.data.settings[botNumber];
-if (typeof setting !== "object") global.db.data.settings[botNumber] = {};
-setting = global.db.data.settings[botNumber];
+  // Initialize global blacklist if it doesn't exist
+  global.db.data.blacklist ??= { blacklisted_numbers: [] };
 
-if (!("autobio" in setting)) setting.autobio = false;
-if (!("autotype" in setting)) setting.autotype = false;
-if (!("anticall" in setting)) setting.anticall = "off";
-if (!("autoread" in setting)) setting.autoread = false;
-if (!("blackbox" in setting)) setting.blackbox = false;
-if (!("jarvis" in setting)) setting.jarvis = false; 
-if (!("perplexity" in setting)) setting.perplexity = false;
-if (!("gemini" in setting)) setting.gemini = false;
-if (!("generate" in setting)) setting.generate = false;
-if (!("dbrx" in setting)) setting.dbrx = false;
-if (!("chatgpt" in setting)) setting.chatgpt = false;
-if (!("anime4k" in setting)) setting.anime4k = false;
-if (!("evilgpt" in setting)) setting.evilgpt = false;
-if (!("openai" in setting)) setting.openai = false;
-if (!("IslamicAi" in setting)) setting.islamicAi = false;
-if (!("deepseekllm" in setting)) setting.deepseekllm = false;
-if (!("doppleai" in setting)) setting.doppleai = false;
-if (!("gpt" in setting)) setting.gpt = false;
-if (!("gpt2" in setting)) setting.gpt2 = false;
-if (!("imagen" in setting)) setting.imagen = false;
-if (!("imagine" in setting)) setting.imagine = false;
-if (!("letterai" in setting)) setting.letterai = false;
-if (!("llama" in setting)) setting.llama = false;
-if (!("metaai" in setting)) setting.metaai = false;
-if (!("mistral" in setting)) setting.mistral = false;
-if (!("photoai" in setting)) setting.photoai = false;
-
-if (!("statusemoji" in setting)) setting.statusemoji = "❤";
-if (!("welcome" in setting)) setting.welcome = false;
-if (!("autoreact" in setting)) setting.autoreact = false;
-if (!("antidelete" in setting)) setting.antidelete = "private";
-if (!("mode" in setting)) setting.mode = "private";
-if (!("antiedit" in setting)) setting.antiedit = "private";
-if (!("alwaysonline" in setting)) setting.alwaysonline = false;
-if (!("autorecord" in setting)) setting.autorecord = false;
-if (!("autoviewstatus" in setting)) setting.autoviewstatus = false;
-if (!("autoreactstatus" in setting)) setting.autoreactstatus = false;
-if (!("autorecordtype" in setting)) setting.autorecordtype = false;
-
-
-  let blacklist = global.db.data.blacklist;
-  if (!blacklist || typeof blacklist !== "object") global.db.data.blacklist = { blacklisted_numbers: [] };
 
 } catch (err) {
-  console.error("Error initializing database:", err);
+  console.error("Error during database initialization in system.js (this block):", err);
 }
+//================== [ END DATABASE ] ==================//
 
 //================== [ CONSOLE LOG] ==================//
-const timezones = global.db.data.settings.timezone || 'Africa/Accra';
+const timezones = global.db.data.settings.timezone || 'Africa/Accra'; // Assuming timezone is still global
 const dayz = moment(Date.now()).tz(timezones).locale('en').format('dddd');
 const timez = moment(Date.now()).tz(timezones).locale('en').format('HH:mm:ss z');
 const datez = moment(Date.now()).tz(timezones).format('DD/MM/YYYY');
@@ -1142,411 +820,150 @@ if (m.message) {
   lolcatjs.fromString(`» Message: ${budy || 'N/A'}`);
  lolcatjs.fromString('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━─ ⳹\n\n');
 }
+//<===========================================>//
+//auto set bio\\
+// Use per-bot-instance autobio setting under users
+if (global.db.data.users[botJid]?.autobio) {
+
+     let xdpy = moment(Date.now()).tz(`${timezones}`).locale('en').format('dddd');
+     let xtipe = moment(Date.now()).tz(`${timezones}`).locale('en').format('HH:mm z');
+     let xdpte = moment(Date.now()).tz(`${timezones}`).format("DD/MM/YYYY");
+
+ Matrix.updateProfileStatus(
+    `${xtipe}, ${xdpy}; ${xdpte}:- ${botname}`
+  ).catch((_) => _);
+}
+
 //<================================================>//
-    //auto set bio\\
-    if (db.data.settings[botNumber].autobio) {
-    
-         let xdpy = moment(Date.now()).tz(`${timezones}`).locale('en').format('dddd');
-         let xtipe = moment(Date.now()).tz(`${timezones}`).locale('en').format('HH:mm z');
-         let xdpte = moment(Date.now()).tz(`${timezones}`).format("DD/MM/YYYY");
-        
-     Matrix.updateProfileStatus(
-        `${xtipe}, ${xdpy}; ${xdpte}:- ${botname}`
-      ).catch((_) => _);
+    //auto type record (per bot instance)
+if (global.db.data.users[botJid]?.autorecordtype) {
+  if (m.message) {
+    let XpBotmix = ["composing", "recording"];
+    XpBotmix2 = XpBotmix[Math.floor(XpBotmix.length * Math.random())];
+    Matrix.sendPresenceUpdate(XpBotmix2, from);
   }
+}
+if (global.db.data.users[botJid]?.autorecord) {
+  if (m.message) {
+    let XpBotmix = ["recording"];
+    XpBotmix2 = XpBotmix[Math.floor(XpBotmix.length * Math.random())];
+    Matrix.sendPresenceUpdate(XpBotmix2, from);
+  }
+}
+if (global.db.data.users[botJid]?.autotype) {
+  if (m.message) {
+    let XpBotpos = ["composing"];
+    Matrix.sendPresenceUpdate(XpBotpos, from);
+  }
+}
+
 //<================================================>//
-    //auto type record
-    if (db.data.settings[botNumber].autorecordtype) {
-      if (m.message) {
-        let XpBotmix = ["composing", "recording"];
-        XpBotmix2 = XpBotmix[Math.floor(XpBotmix.length * Math.random())];
-        Matrix.sendPresenceUpdate(XpBotmix2, from);
-      }
-    }
-    if (db.data.settings[botNumber].autorecord) {
-      if (m.message) {
-        let XpBotmix = ["recording"];
-        XpBotmix2 = XpBotmix[Math.floor(XpBotmix.length * Math.random())];
-        Matrix.sendPresenceUpdate(XpBotmix2, from);
-      }
-    }
-    if (db.data.settings[botNumber].autotype) {
-      if (m.message) {
-        let XpBotpos = ["composing"];
-        Matrix.sendPresenceUpdate(XpBotpos, from);
-      }
-    }   
-//<================================================>//
-    if (from.endsWith('@g.us') && db.data.chats[m.chat].antibot) {
-  if (m.isBaileys && (!isAdmins || !isCreator || isBotAdmins )) {
-          m.reply(`*BOT DETECTED*\n\nGo away!`);
-          await Matrix.groupParticipantsUpdate(
-            m.chat,
-            [m.sender],
-            "remove"
-          );
-        }
-    }
+    // ANTIBOT
     
-    
-//<================================================>//
-//Message Handler-mesaages.upsert//
-//<================================================>//
 
-
-//<================================================>//
-//Message Handler-mesaages.upsert//
-//<================================================>//
-
-Matrix.ev.on("messages.upsert", async (data) => {
-    const message = data.messages[0];
-    if (!message || !message.message) return;
-
-    const botNumber = safeDecodeJid(Matrix.user.id);
-    const isGroup = message.key.remoteJid.endsWith("@g.us");
-    const isSenderBot = message.key.participant === botNumber;
-    const sender = message.sender || message.key.participant || message.key.remoteJid;
-    const messageId = message.key.id;
-
-    // Prevent duplicate replies
-    if (lastProcessedMessageId[sender] === messageId) return;
-    lastProcessedMessageId[sender] = messageId;
-
-    const safeChatId = safeDecodeJid(message.chat);
-    if (!safeChatId) return;
-
-    const prefix = global.db?.data?.settings?.prefix || ".";
-
-    // --- Extract text/caption ---
-    const originalUserTextContent = (
-        message.message.extendedTextMessage?.text ||
-        message.message.conversation ||
-        message.message.imageMessage?.caption ||
-        message.message.videoMessage?.caption ||
-        message.message.documentMessage?.caption || ""
-    ).trim();
-
-    // Normalize message: lowercase, collapse spaces, trim
-    const msgText = originalUserTextContent.toLowerCase().replace(/\s+/g, ' ').trim();
-
-    // Regex: matches .adizachat off, . adizachat off, .   adizachat off, etc.
-    const adizachatRegex = new RegExp(`^\\s*\\${prefix}\\s*adizachat\\s*(on|off)?\\s*$`, 'i');
-    const adizachatMatch = msgText.match(adizachatRegex);
-
-    if (adizachatMatch) {
-        const action = adizachatMatch[1]?.toLowerCase();
-        if (action === 'off') {
-            await Matrix.sendMessage(safeChatId, { text: "❌ Adizachat disabled for you." }, { quoted: message });
-            return;
-        }
-        if (action === 'on') {
-            await Matrix.sendMessage(safeChatId, { text: "✅ Adizachat enabled for you." }, { quoted: message });
-            return;
-        }
-        // Just ".adizachat" or ". adizachat"
-        await Matrix.sendMessage(safeChatId, { text: "ℹ️ Use `.adizachat on` or `.adizachat off` to enable or disable Adizachat." }, { quoted: message });
-        return;
-    }
-    // --- END COMMAND FILTER ---
-
-    // --- AI LOGIC STARTS HERE ---
-    const userState = getUserApiState(sender);
-
-    // --- DEBUG LOGGING ---
-    console.log("\n--- MESSAGE PROCESSING START ---");
-    console.log(`[DEBUG] Sender: ${sender}`);
-    console.log(`[DEBUG] Chat ID: ${safeChatId}`);
-    console.log(`[DEBUG] Is Group: ${isGroup}`);
-    console.log(`[DEBUG] Message Text (original): '${originalUserTextContent}'`);
-    console.log(`[DEBUG] Message Text (normalized): '${msgText}'`);
-    console.log(`[DEBUG] AdizaUserStates:`, userState);
-    console.log(`[DEBUG] mainOwner: ${mainOwner}`);
-    console.log(`[DEBUG] botNumber: ${botNumber}`);
-    // --- END DEBUG LOGGING ---
-
-    const selectedKey = msgText.startsWith(prefix) ? msgText.substring(prefix.length).toLowerCase() : null;
-    const isOwnerSelfChat = !isGroup && sender === mainOwner && safeChatId === mainOwner;
-
-    // --- RESET COMMAND (works anywhere, always confirms) ---
-    if (
-        (originalUserTextContent.trim().toLowerCase() === `${prefix}reset`) ||
-        (msgText === "reset")
-    ) {
-        chatHistory[sender] = {};
-        await Matrix.sendMessage(safeChatId, { text: "✅ Chat history has been reset!" }, { quoted: message });
-        console.log(`[AI_RESPONSE] Chat history reset for ${sender}.`);
-        return;
-    }
-
-    // --- Model selection block (unchanged, keep your own logic here) ---
-
-    if (userState.enabled && message.chat === sender && !isSenderBot) {
-        // --- Detect media/files ---
-        const hasMedia =
-            !!message.message.imageMessage ||
-            !!message.message.videoMessage ||
-            !!message.message.documentMessage ||
-            !!message.message.audioMessage;
-        console.log(`[DEBUG] hasMedia: ${hasMedia}`);
-        if (hasMedia) {
-            if (message.message.imageMessage) console.log("[DEBUG] Detected imageMessage");
-            if (message.message.videoMessage) console.log("[DEBUG] Detected videoMessage");
-            if (message.message.documentMessage) console.log("[DEBUG] Detected documentMessage");
-            if (message.message.audioMessage) console.log("[DEBUG] Detected audioMessage");
-        }
-
-        if (!originalUserTextContent && !hasMedia) {
-            console.log("[AI_RESPONSE] No text or processable media found for AI. Skipping.");
-            return;
-        }
-
-        if (!chatHistory[sender]) chatHistory[sender] = {};
-        if (!chatHistory[sender].conversations) chatHistory[sender].conversations = [];
-
-        let responseText = null;
-        const selectedApiInfo = AVAILABLE_APIS[userState.currentApi];
-        const isGeminiSelected = (selectedApiInfo && selectedApiInfo.type === "gemini_sdk");
-
-        let geminiInputParts = [];
-        let generativePart = null;
-        if (isGeminiSelected && geminiApiKey && geminiModel) {
-            if (hasMedia) {
-                console.log(`[Gemini] User sent media. Attempting fileToGenerativePart...`);
-                generativePart = await fileToGenerativePart(message, Matrix);
-                console.log("[DEBUG] generativePart:", generativePart);
-            }
-            // Build Gemini input parts: text first, then media/file
-            if (originalUserTextContent) geminiInputParts.push({ text: originalUserTextContent });
-            if (generativePart) geminiInputParts.push(generativePart);
-
-            // --- DEBUG: Log Gemini input parts ---
-            console.log("[DEBUG] Gemini input parts to send:", JSON.stringify(geminiInputParts, null, 2));
-
-            if (geminiInputParts.length === 0) {
-                console.log("[Gemini] No valid input for Gemini to process.");
-                await Matrix.sendMessage(safeChatId, { text: "❌ I couldn't process your file or message. Try again with a supported file or a different question." }, { quoted: message });
-                return;
-            }
-        } else if (!originalUserTextContent) {
-            console.log("[AI_RESPONSE] No valid text or processable media for non-Gemini AI. Skipping.");
-            return;
-        }
-
-        // Store user's current message in history.
-        if (isGeminiSelected && geminiInputParts.length > 0) {
-            chatHistory[sender].conversations.push({ role: "user", parts: geminiInputParts });
-        } else if (originalUserTextContent) {
-            chatHistory[sender].conversations.push({ role: "user", content: originalUserTextContent });
-        }
-        if (chatHistory[sender].conversations.length > 12) {
-            chatHistory[sender].conversations = chatHistory[sender].conversations.slice(-12);
-        }
-
-        if (!selectedApiInfo) {
-            await Matrix.sendMessage(safeChatId, { text: `❌ An internal error occurred: No valid AI model selected or configured. Please try \`${prefix}adizachat on\` to select one.` }, { quoted: message });
-            return;
-        }
-
-        await withTyping(Matrix, safeChatId, async () => {
-            try {
-                if (selectedApiInfo.type === "gemini_sdk") {
-                    if (!geminiApiKey || !geminiModel) {
-                        throw new Error("Gemini API Key is not configured or model not initialized.");
-                    }
-                    if (geminiInputParts.length === 0) {
-                        throw new Error("No valid input for Gemini to process.");
-                    }
-
-                    let historyForGemini = chatHistory[sender].conversations
-                        .slice(0, -1)
-                        .filter(entry => entry.role === "user" || entry.role === "assistant")
-                        .map(entry => {
-                            if (entry.parts) {
-                                return { role: entry.role === "user" ? "user" : "model", parts: entry.parts };
-                            } else if (entry.content) {
-                                return { role: entry.role === "user" ? "user" : "model", parts: [{ text: entry.content }] };
-                            }
-                            return null;
-                        })
-                        .filter(entry => entry !== null);
-
-                    while (historyForGemini.length > 0 && historyForGemini[0].role !== "user") {
-                        historyForGemini.shift();
-                    }
-
-                    const chat = geminiModel.startChat({
-                        history: historyForGemini.length > 0 ? historyForGemini : undefined,
-                        safetySettings: geminiModel.safetySettings,
-                    });
-
-                    const currentUserInputParts = chatHistory[sender].conversations[chatHistory[sender].conversations.length - 1]?.parts;
-                    if (!currentUserInputParts || currentUserInputParts.length === 0) {
-                        throw new Error("No valid parts found in the current user message for Gemini.");
-                    }
-
-                    await Matrix.sendMessage(safeChatId, { react: { text: "✨", key: message.key } });
-                    const result = await chat.sendMessage(currentUserInputParts);
-                    const response = await result.response;
-                    responseText = response.text();
-                    console.log(`[Gemini] Response received for ${sender.split('@')[0]}: ${responseText.substring(0, Math.min(responseText.length, 50))}...`);
-
-                } else if (selectedApiInfo.type === "external_url") {
-                    let queryToSend = selectedApiInfo.usesRawText ? originalUserTextContent : chatHistory[sender].conversations.map(x => {
-                        if (x.parts && x.parts[0] && x.parts[0].text) return `${x.role}: ${x.parts[0].text}`;
-                        if (x.content) return `${x.role}: ${x.content}`;
-                        return '';
-                    }).filter(Boolean).join("\n");
-                    let apiUrl = selectedApiInfo.url(queryToSend);
-
-                    if (selectedApiInfo.responseType === "image") {
-                        await Matrix.sendMessage(safeChatId, { react: { text: "🎨", key: message.key } });
-                        if (selectedApiInfo.directImageUrl) {
-                            await Matrix.sendMessage(safeChatId, { image: { url: apiUrl }, caption: `Image generated by *${selectedApiInfo.displayName}* for: "${originalUserTextContent}"` }, { quoted: message });
-                        } else {
-                            const res = await axios.get(apiUrl);
-                            const data = res.data;
-                            let imageUrl = selectedApiInfo.responseKey ? selectedApiInfo.responseKey.split('.').reduce((o, k) => (o || {})[k], data) : (data?.url || data?.image || data?.photo || data);
-                            if (typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
-                                await Matrix.sendMessage(safeChatId, { image: { url: imageUrl }, caption: `Image generated by *${selectedApiInfo.displayName}* for: "${originalUserTextContent}"` }, { quoted: message });
-                            } else {
-                                throw new Error("Image API returned invalid URL or no image.");
-                            }
-                        }
-                        responseText = null;
-                    } else {
-                        await Matrix.sendMessage(safeChatId, { react: { text: "💬", key: message.key } });
-                        const res = await axios.get(apiUrl);
-                        const data = res.data;
-                        let extractedResponse = selectedApiInfo.responseKey ? selectedApiInfo.responseKey.split('.').reduce((o, k) => (o || {})[k], data) : (data?.result || data?.response || data?.data || data?.BK9 || null);
-
-                        if (extractedResponse) {
-                            responseText = extractedResponse;
-                        } else {
-                            throw new Error("API returned empty or unparseable response.");
-                        }
-                    }
-                } else if (selectedApiInfo.type === "hazex_multi_image") {
-                    await Matrix.sendMessage(safeChatId, { react: { text: "🖼️", key: message.key } });
-                    const numPhotos = 6;
-                    const mediaMessages = [];
-                    for (let i = 0; i < numPhotos; i++) {
-                        const uniquePrompt = `${originalUserTextContent} - ${Date.now() + i}`;
-                        const imageUrl = `${selectedApiInfo.baseUrl}?prompt=${encodeURIComponent(uniquePrompt)}`;
-                        mediaMessages.push({ image: { url: imageUrl }, caption: i === 0 ? `🖼️ Generated by *${selectedApiInfo.displayName}* for: *${originalUserTextContent}*` : undefined });
-                    }
-                    for (const mediaMsg of mediaMessages) {
-                        await Matrix.sendMessage(safeChatId, mediaMsg, { quoted: message });
-                        await delay(500);
-                    }
-                    responseText = null;
-                } else if (selectedApiInfo.type === "command_mode") {
-                    await Matrix.sendMessage(safeChatId, { text: `*${selectedApiInfo.displayName}* mode is active. This mode might require a specific command. Please check bot commands.` }, { quoted: message });
-                    responseText = null;
-                }
-            } catch (e) {
-                let errorMessage = "Sorry, I couldn't process that. ";
-                if (e.response && e.response.status === 429) {
-                    errorMessage = "I'm receiving too many requests right now. Please try again in a moment!";
-                } else if (e.message.includes("400 Bad Request") || e.message.includes("blocked") || e.message.includes("invalid input")) {
-                    errorMessage += "It might contain content that violates safety guidelines, or there was an issue with the input. Please try a different query or file.";
-                } else if (e.message.includes("No valid input") || e.message.includes("No valid parts")) {
-                    errorMessage += "I couldn't process your input (maybe the file type isn't supported).";
-                } else if (e.message.includes("Gemini API Key is not configured")) {
-                    errorMessage = "My Gemini model is not configured. Please contact the bot owner.";
-                } else {
-                    errorMessage += `Error: \`${String(e.message).substring(0, 100)}\``;
-                }
-                // No model disabling/blocking! User can try again immediately.
-                await Matrix.sendMessage(safeChatId, { text: errorMessage }, { quoted: message });
-                return;
-            }
-        });
-
-        if (responseText) {
-            if (isGeminiSelected) {
-                chatHistory[sender].conversations.push({ role: "assistant", parts: [{ text: responseText }] });
-            } else {
-                chatHistory[sender].conversations.push({ role: "assistant", content: responseText });
-            }
-            const messageParts = splitMessage(responseText);
-            for (const part of messageParts) {
-                await Matrix.sendMessage(safeChatId, { text: part }, { quoted: message });
-                await delay(200);
-            }
-        } else if (responseText === null) {
-            // Do nothing if responseText is null (e.g., for image generation or handled media replies)
-        } else {
-            await Matrix.sendMessage(safeChatId, { text: "❌ I'm having trouble generating a response right now. Please try again later!" }, { quoted: message });
-        }
-    }
-    console.log("--- MESSAGE PROCESSING END ---\n");
-});
-
-//<================================================>//
 
 
 //<================================================>//
 
+// ANTICONTACT
 global.contactCounts = global.contactCounts || {};
 
- if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.anticontact) {
+// Check if it's a group chat and anticontact is enabled for that chat
+if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.anticontact) {
   const msg = m.message || {};
   const chatId = m.chat;
   const senderId = m.sender;
-  const isAdmin = (await getGroupAdmins(chatId)).includes(senderId);
 
-  const isContact = msg.contactMessage || msg.contactsArrayMessage;
+  const ownerNumbers = Array.isArray(global.owner) ? global.owner : [global.owner];
+  const senderNumber = senderId.split('@')[0];
+  const isCreator = ownerNumbers.includes(senderNumber);
 
-  if (isContact && !isAdmin) {
+// --- Admin Check ---
+// Get group metadata first
+const groupMetadata = await Matrix.groupMetadata(m.chat).catch(e => {
+    return null; // Return null if metadata fetch fails
+});
+
+let groupAdmins = [];
+if (groupMetadata && groupMetadata.participants) {
+    // Then pass the participants array to getGroupAdmins
+    groupAdmins = await getGroupAdmins(groupMetadata.participants);
+}
+
+  const isAdmin = groupAdmins.includes(senderId);
+  const isExempt = isAdmin || isCreator;
+
+  // Check for formal contact messages
+  const isContactMessage = msg.contactMessage || msg.contactsArrayMessage;
+
+  let isRawPhoneNumber = false;
+  if (m.text) {
+    const text = m.text.replace(/\s+/g, '');
+    // Regex to detect various phone number formats (international, local, Ghana's 233 prefix)
+    const phoneNumberRegex = /(\+\d{7,15})|(0\d{9,10})|(233\d{9})|(\b\d{9,10}\b)/;
+    isRawPhoneNumber = phoneNumberRegex.test(text);
+  }
+
+  const isPhoneNumberRelated = isContactMessage || isRawPhoneNumber;
+
+  // Only proceed if it's a phone number related message AND the sender is NOT exempt
+  if (isPhoneNumberRelated && !isExempt) {
     const currentTimestamp = m.messageTimestamp * 1000;
     global.contactCounts[senderId] = global.contactCounts[senderId] || { count: 0, lastTimestamp: 0 };
 
     const userData = global.contactCounts[senderId];
 
-    if (currentTimestamp - userData.lastTimestamp <= 10000) {
+    if (currentTimestamp - userData.lastTimestamp <= 10000) { // Cooldown of 10 seconds
       userData.count++;
     } else {
-      userData.count = 1;
+      userData.count = 1; // Reset count if outside cooldown
     }
     userData.lastTimestamp = currentTimestamp;
 
-    // Delete the contact message
-    await Matrix.sendMessage(chatId, {
-      delete: {
-        remoteJid: chatId,
-        fromMe: false,
-        id: m.key.id,
-        participant: m.key.participant
-      }
-    });
-
-    if (userData.count === 1) {
+    // Delete the message (always delete if it's a blocked type and not exempt)
+    try {
       await Matrix.sendMessage(chatId, {
-        text: "CONTACT BLOCKED\n\n@" + senderId.split("@")[0] + " *Only admins are allowed to send contacts in this group!*",
+        delete: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: m.key.id,
+          participant: m.key.participant
+        }
+      });
+    } catch (deleteError) {
+      console.error('[ERROR] Failed to delete message:', deleteError); // Kept for actual errors
+    }
+
+    // Logic for warnings and kicking
+    if (userData.count <= 3) { // Warn for the 1st, 2nd, and 3rd offenses
+      await Matrix.sendMessage(chatId, {
+        text: `PHONE NUMBER BLOCKED (Attempt ${userData.count}/3 warnings)\n\n@` + senderId.split("@")[0] + " *Only admins and the bot creator are allowed to send contact numbers in this group!*",
         contextInfo: {
           mentionedJid: [senderId]
         }
       }, { quoted: m });
-    } else if (userData.count >= 2) {
+    } else if (userData.count >= 4) { // Kick on the 4th offense
       try {
         await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
         await Matrix.sendMessage(chatId, {
-          text: `@${senderId.split('@')[0]} has been kicked for repeatedly sending contacts.`,
+          text: `@${senderId.split('@')[0]} has been kicked for repeatedly sending contact numbers (${userData.count} offenses).`,
           contextInfo: {
             mentionedJid: [senderId]
           }
         });
-        delete global.contactCounts[senderId];
+        delete global.contactCounts[senderId]; // Reset count after kick
       } catch (kickError) {
-        console.error("Error kicking user:", kickError);
+        console.error("[ERROR] Error kicking user for phone number spam:", kickError); // Kept for actual errors
+        await m.reply(`[ERROR] Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${kickError.message}`); // Inform group if kick fails
       }
     }
   }
 }
-//<================================================>//
-const storeFile = "./src/store.json";
 
-function loadStoredMessages() {
+//<================================================>//
+const storeFile = "./src/store.json"; // Make sure this is defined at the top of system.js if not already.
+
+function loadStoredMessages() { // Make sure this is defined at the top of system.js if not already.
     if (fs.existsSync(storeFile)) {
         return JSON.parse(fs.readFileSync(storeFile));
     }
@@ -1556,278 +973,165 @@ function loadStoredMessages() {
 //*---------------------------------------------------------------*//
 
 if (
-    m.message?.protocolMessage?.type === 0 && 
-    m.message?.protocolMessage?.key
+    m.message?.protocolMessage?.type === 0 && // Check for deletion protocol message
+    m.message?.protocolMessage?.key // Ensure there's a key for the deleted message
 ) {
-    if (global.antidelete === 'off') {
-        // Anti-delete is disabled, do nothing
-        return;
-    }
+    try {
+        // FIX: Read antidelete mode from the individual bot instance settings
+        // 'botInstanceSettings' is defined at the top of the Matrix function in system.js
+        const instanceAntideleteMode = botInstanceSettings.antidelete ?? global.db.data.settings.antidelete ?? "private"; // Default to "private" if not set
 
-    if (global.antidelete === 'private') {
-        try {
-            let messageId = m.message.protocolMessage.key.id;
-            let chatId = m.chat;
-            let deletedBy = m.sender;
+        if (instanceAntideleteMode === 'off') {
+            // Anti-delete is disabled for this bot instance, skip processing
+            return;
+        }
 
-            let storedMessages = loadStoredMessages();
-            let deletedMsg = storedMessages[chatId]?.[messageId];
+        const messageId = m.message.protocolMessage.key.id;
+        const chatId = m.chat;
+        const deletedBy = m.sender; // The JID of the person who deleted the message
 
-            if (!deletedMsg) {
-                console.log("⚠️ Deleted message not found in database.");
-                return;
+        const storedMessages = loadStoredMessages(); // Load messages from store.json
+        const deletedMsg = storedMessages[chatId]?.[messageId]; // Try to find the deleted message in the store
+
+        if (!deletedMsg) {
+            console.log("⚠️ Deleted message not found in database."); // Log if message wasn't stored or is too old
+            return;
+        }
+
+        const sender = deletedMsg.key.participant || deletedMsg.key.remoteJid; // Original sender of the message
+
+        // Determine chat name for the output message
+        let chatName;
+        if (deletedMsg.key.remoteJid === 'status@broadcast') {
+            chatName = "Status Update";
+        } else if (m.isGroup) { // Check if it's a group chat
+            try {
+                const groupInfo = await Matrix.groupMetadata(chatId);
+                chatName = groupInfo.subject || "Group Chat";
+            } catch {
+                chatName = "Group Chat";
             }
+        } else {
+            chatName = deletedMsg.pushName || m.pushName || "Private Chat"; // Use pushName for private chats
+        }
 
-            let sender = deletedMsg.key.participant || deletedMsg.key.remoteJid;
+        // Format timestamps
+        const xtipes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).locale('en').format('HH:mm z');
+        const xdptes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).format("DD/MM/YYYY");
 
-            let chatName;
-            if (deletedMsg.key.remoteJid === 'status@broadcast') {
-                chatName = "Status Update";
-            } else if (m.isGroup) {
-                try {
-                    const groupInfo = await Matrix.groupMetadata(m.chat);
-                    chatName = groupInfo.subject || "Group Chat";
-                } catch {
-                    chatName = "Group Chat";
-                }
-            } else {
-                chatName = deletedMsg.pushName || m.pushName || "Private Chat";
-            }
+        // Decide where to send the recovered message: private chat or current chat
+        const targetJid = (instanceAntideleteMode === 'private') ? Matrix.user.id : chatId; // This is the key change!
 
-            let xtipes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).locale('en').format('HH:mm z');
-            let xdptes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).format("DD/MM/YYYY");
+        // Handle deleted media messages
+        if (!deletedMsg.message.conversation && !deletedMsg.message.extendedTextMessage) {
+            try {
+                // Forward the original deleted message to the target JID
+                let forwardedMsg = await Matrix.sendMessage(
+                    targetJid,
+                    {
+                        forward: deletedMsg,
+                        contextInfo: { isForwarded: false } // Mark as not forwarded from source
+                    },
+                    { quoted: deletedMsg } // Quote the original (now forwarded) message
+                );
 
-            if (!deletedMsg.message.conversation && !deletedMsg.message.extendedTextMessage) {
-                try {
-                    let forwardedMsg = await Matrix.sendMessage(
-                        Matrix.user.id,
-                        { 
-                            forward: deletedMsg,
-                            contextInfo: { isForwarded: false }
-                        },
-                        { quoted: deletedMsg }
-                    );
-                    
-                    let mediaInfo = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝙳𝙸𝙰!* 🚨
+                // Send a text summary about the deleted media
+                let mediaInfo = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝙳𝙸𝙰!* 🚨
 ${readmore}
 𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]} 
+𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]}
 𝚃𝙸𝙼𝙴: ${xtipes}
 𝙳𝙰𝚃𝙴: ${xdptes}
 𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}`;
 
-                    await Matrix.sendMessage(
-                        Matrix.user.id, 
-                        { text: mediaInfo, mentions: [sender, deletedBy] },
-                        { quoted: forwardedMsg }
-                    );
-                    
-                } catch (mediaErr) {
-                    console.error("Media recovery failed:", mediaErr);
-                    let replyText = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝚂𝚂𝙰𝙶𝙴!* 🚨
-${readmore}
-𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]} 
-𝚃𝙸𝙼𝙴 𝚂𝙴𝙽𝚃: ${xtipes}
-𝙳𝙰𝚃𝙴 𝚂𝙴𝙽𝚃: ${xdptes}
-𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}
+                await Matrix.sendMessage(
+                    targetJid,
+                    { text: mediaInfo, mentions: [sender, deletedBy] },
+                    { quoted: forwardedMsg } // Quote the forwarded message
+                );
 
-𝙼𝙴𝚂𝚂𝙰𝙶𝙴: [Unsupported media content]`;
-
-                    let quotedMessage = {
-                        key: {
-                            remoteJid: chatId,
-                            fromMe: sender === Matrix.user.id,
-                            id: messageId,
-                            participant: sender
-                        },
-                        message: { conversation: "Media recovery failed" }
-                    };
-
-                    await Matrix.sendMessage(
-                        Matrix.user.id,
-                        { text: replyText, mentions: [sender, deletedBy] },
-                        { quoted: quotedMessage }
-                    );
-                }
-            } 
-            else {
-                let text = deletedMsg.message.conversation || 
-                          deletedMsg.message.extendedTextMessage?.text;
-
+            } catch (mediaErr) {
+                console.error("Media recovery failed:", mediaErr); // Log error if media forwarding fails
+                // Fallback text if media forwarding fails
                 let replyText = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝚂𝚂𝙰𝙶𝙴!* 🚨
 ${readmore}
 𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]} 
+𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]}
 𝚃𝙸𝙼𝙴 𝚂𝙴𝙽𝚃: ${xtipes}
 𝙳𝙰𝚃𝙴 𝚂𝙴𝙽𝚃: ${xdptes}
 𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}
 
-𝙼𝙴𝚂𝚂𝙰𝙶𝙴: ${text}`;
+𝙼𝙴𝚂𝚂𝙰𝙶𝙴: [Unsupported media content or media recovery failed]`;
 
-                let quotedMessage = {
+                let quotedMessage = { // Create a fake quoted message for context
                     key: {
                         remoteJid: chatId,
                         fromMe: sender === Matrix.user.id,
                         id: messageId,
                         participant: sender
                     },
-                    message: {
-                        conversation: text 
-                    }
+                    message: { conversation: "Media recovery failed" }
                 };
 
                 await Matrix.sendMessage(
-                    Matrix.user.id,
+                    targetJid,
                     { text: replyText, mentions: [sender, deletedBy] },
                     { quoted: quotedMessage }
                 );
             }
-
-        } catch (err) {
-            console.error("❌ Error processing deleted message:", err);
         }
-    } else if (
-        m.sender !== botNumber &&
-        global.antidelete === 'chat'
-    ) {
-        try {
-            let messageId = m.message.protocolMessage.key.id;
-            let chatId = m.chat;
-            let deletedBy = m.sender;
+        // Handle deleted text messages
+        else {
+            let text = deletedMsg.message.conversation ||
+                      deletedMsg.message.extendedTextMessage?.text;
 
-            let storedMessages = loadStoredMessages();
-            let deletedMsg = storedMessages[chatId]?.[messageId];
-
-            if (!deletedMsg) {
-                console.log("⚠️ Deleted message not found in database.");
-                return;
-            }
-
-            let sender = deletedMsg.key.participant || deletedMsg.key.remoteJid;
-
-            let chatName;
-            if (deletedMsg.key.remoteJid === 'status@broadcast') {
-                chatName = "Status Update";
-            } else if (m.isGroup) {
-                try {
-                    const groupInfo = await Matrix.groupMetadata(m.chat);
-                    chatName = groupInfo.subject || "Group Chat";
-                } catch {
-                    chatName = "Group Chat";
-                }
-            } else {
-                chatName = deletedMsg.pushName || m.pushName || "Private Chat";
-            }
-
-            let xtipes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).locale('en').format('HH:mm z');
-            let xdptes = moment(deletedMsg.messageTimestamp * 1000).tz(`${timezones}`).format("DD/MM/YYYY");
-
-            if (!deletedMsg.message.conversation && !deletedMsg.message.extendedTextMessage) {
-                try {
-                    let forwardedMsg = await Matrix.sendMessage(
-                        m.chat,
-                        { 
-                            forward: deletedMsg,
-                            contextInfo: { isForwarded: false }
-                        },
-                        { quoted: deletedMsg }
-                    );
-                    
-                    let mediaInfo = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝙳𝙸𝙰!* 🚨
+            let replyText = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝚂𝚂𝙰𝙶𝙴!* 🚨
 ${readmore}
 𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]} 
-𝚃𝙸𝙼𝙴: ${xtipes}
-𝙳𝙰𝚃𝙴: ${xdptes}
-𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}`;
-
-                    await Matrix.sendMessage(
-                        m.chat, 
-                        { text: mediaInfo, mentions: [sender, deletedBy] },
-                        { quoted: forwardedMsg }
-                    );
-                    
-                } catch (mediaErr) {
-                    console.error("Media recovery failed:", mediaErr);
-                    let replyText = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝚂𝚂𝙰𝙶𝙴!* 🚨
-${readmore}
-𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]} 
-𝚃𝙸𝙼𝙴 𝚂𝙴𝙽𝚃: ${xtipes}
-𝙳𝙰𝚃𝙴 𝚂𝙴𝙽𝚃: ${xdptes}
-𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}
-
-𝙼𝙴𝚂𝚂𝙰𝙶𝙴: [Unsupported media content]`;
-
-                    let quotedMessage = {
-                        key: {
-                            remoteJid: chatId,
-                            fromMe: sender === Matrix.user.id,
-                            id: messageId,
-                            participant: sender
-                        },
-                        message: { conversation: "Media recovery failed" }
-                    };
-
-                    await Matrix.sendMessage(
-                        m.chat,
-                        { text: replyText, mentions: [sender, deletedBy] },
-                        { quoted: quotedMessage }
-                    );
-                }
-            } 
-            else {
-                let text = deletedMsg.message.conversation || 
-                          deletedMsg.message.extendedTextMessage?.text;
-
-                let replyText = `🚨 *𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙼𝙴𝚂𝚂𝙰𝙶𝙴!* 🚨
-${readmore}
-𝙲𝙷𝙰𝚃: ${chatName}
-𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]} 
+𝚂𝙴𝙽𝚃 𝙱𝚈: @${sender.split('@')[0]}
 𝚃𝙸𝙼𝙴 𝚂𝙴𝙽𝚃: ${xtipes}
 𝙳𝙰𝚃𝙴 𝚂𝙴𝙽𝚃: ${xdptes}
 𝙳𝙴𝙻𝙴𝚃𝙴𝙳 𝙱𝚈: @${deletedBy.split('@')[0]}
 
 𝙼𝙴𝚂𝚂𝙰𝙶𝙴: ${text}`;
 
-                let quotedMessage = {
-                    key: {
-                        remoteJid: chatId,
-                        fromMe: sender === Matrix.user.id,
-                        id: messageId,
-                        participant: sender
-                    },
-                    message: {
-                        conversation: text 
-                    }
-                };
+            let quotedMessage = { // Create a fake quoted message for context
+                key: {
+                    remoteJid: chatId,
+                    fromMe: sender === Matrix.user.id,
+                    id: messageId,
+                    participant: sender
+                },
+                message: {
+                    conversation: text
+                }
+            };
 
-                await Matrix.sendMessage(
-                    m.chat,
-                    { text: replyText, mentions: [sender, deletedBy] },
-                    { quoted: quotedMessage }
-                );
-            }
-
-        } catch (err) {
-            console.error("❌ Error processing deleted message:", err);
+            await Matrix.sendMessage(
+                targetJid,
+                { text: replyText, mentions: [sender, deletedBy] },
+                { quoted: quotedMessage }
+            );
         }
+
+    } catch (err) {
+        console.error("❌ Error processing deleted message:", err); // Log any general error in the handler
     }
 }
 //<================================================>//
+
 // ==================== ANTI-EDIT FEATURE ====================
+
+
+const instanceAntieditMode = botInstanceSettings.antiedit ?? global.db.data.settings.antiedit ?? "private"; // Default to "private"
 
 if (
   m.sender !== botNumber &&
-  !m.id.startsWith("3EB0") &&
-  (
-    db.data.settings.antiedit === "private" ||
-    db.data.settings.antiedit === "chat"
-  ) &&
+  !m.id.startsWith("3EB0") && // These checks are fine, keep them.
+  (instanceAntieditMode === "private" || instanceAntieditMode === "chat") && // FIX: Use individual setting here
   (
     m.message?.protocolMessage?.editedMessage?.conversation ||
-    m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text
+    m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text // Ensure edited content exists
   )
 ) {
   try {
@@ -1835,8 +1139,9 @@ if (
     const chatId = m.chat;
     const editor = m.sender;
 
-    // Get the original message from Baileys store
-    const originalMsgObj = store.messages[chatId]?.get(editedMsgId);
+
+    const storedMessages = loadStoredMessages(); // Ensure loadStoredMessages() is defined at the top of system.js
+    const originalMsgObj = storedMessages[chatId]?.[editedMsgId];
 
     // Prepare details (fallbacks if message not found)
     let originalSender = editor;
@@ -1853,14 +1158,27 @@ if (
       dateSent = moment(originalMsgObj.messageTimestamp * 1000).tz(timezones + "").format("DD/MM/YYYY");
     }
 
-    const chatType = chatId.endsWith("@g.us") ? "(Group Chat)" : "(Private Chat)";
+    // Determine chat name for the output message (using m.isGroup for current chat context)
+    let chatName;
+    if (m.isGroup) {
+      try {
+        const groupInfo = await Matrix.groupMetadata(chatId);
+        chatName = groupInfo.subject || "Group Chat";
+      } catch {
+        chatName = "Group Chat";
+      }
+    } else {
+      chatName = m.pushName || "Private Chat"; // Use m.pushName for private chats
+    }
+    const chatType = chatId.endsWith("@g.us") ? "(Group Chat)" : "(Private Chat)"; // For fallback if chatName isn't robust
+
     const editedTo =
       m.message.protocolMessage?.editedMessage?.conversation ||
       m.message.protocolMessage?.editedMessage?.extendedTextMessage?.text;
 
     const antiEditMsg =
       `🚨 *EDITED MESSAGE!* 🚨\n${readmore}` +
-      `\nCHAT: ${chatType}` +
+      `\nCHAT: ${chatName || chatType}` + // Use chatName if available, else chatType for display
       `\nSENT BY: @${originalSender.split("@")[0]}` +
       `\nSENT ON: ${timeSent}` +
       `\nDATE SENT: ${dateSent}` +
@@ -1868,10 +1186,13 @@ if (
       `\n\nORIGINAL MSG: ${originalText}` +
       `\n\nEDITED TO: ${editedTo}`;
 
+    // Decide where to send the recovered message
+    const targetJid = (instanceAntieditMode === 'private') ? Matrix.user.id : chatId;
+
     // === PRIVATE MODE: Send to yourself ===
-    if (db.data.settings.antiedit === "private") {
+    if (instanceAntieditMode === "private") { // FIX: Use individual setting here
       if (originalMsgObj) {
-        const quotedObj = {
+        const quotedObj = { // Create a quoted object for context
           key: originalMsgObj.key,
           message: {
             conversation: originalText
@@ -1883,7 +1204,7 @@ if (
         }, {
           quoted: quotedObj
         });
-      } else {
+      } else { // Fallback if original message object is not found in store
         await Matrix.sendMessage(Matrix.user.id, {
           text: antiEditMsg,
           mentions: [originalSender, editor]
@@ -1892,9 +1213,9 @@ if (
     }
 
     // === CHAT MODE: Send to the current chat (group or private) ===
-    if (db.data.settings.antiedit === "chat") {
+    if (instanceAntieditMode === "chat") { // FIX: Use individual setting here
       if (originalMsgObj) {
-        const quotedObj = {
+        const quotedObj = { // Create a quoted object for context
           key: originalMsgObj.key,
           message: {
             conversation: originalText
@@ -1906,7 +1227,7 @@ if (
         }, {
           quoted: quotedObj
         });
-      } else {
+      } else { // Fallback if original message object is not found in store
         await Matrix.sendMessage(chatId, {
           text: antiEditMsg,
           mentions: [originalSender, editor]
@@ -1914,17 +1235,20 @@ if (
       }
     }
 
-    // === OFF MODE: Do nothing ===
-    // (No code needed, as this block won't run if antiedit is "off")
+    // === OFF MODE: Do nothing === (handled by the initial if condition)
 
   } catch (err) {
     console.error("❌ Error processing edited message:", err);
   }
 }
 
+
 //<================================================>//
+// ANTICALL HANDLER
+
 Matrix.ev.on('call', async (callEvent) => {
-  const mode = global.db.data.settings?.anticall;
+  
+  const mode = botInstanceSettings.anticall ?? global.db.data.settings.anticall ?? "off"; // Default to "off" if not found anywhere
 
   // If anticall is off or not set, do nothing
   if (!mode || mode === 'off') return;
@@ -1979,13 +1303,13 @@ Matrix.ev.on('call', async (callEvent) => {
 //<================================================>//
 
 
+
 global.mediaCounts = global.mediaCounts || {};
 
 if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antimedia) {
   const msg       = m.message || {};
   const chatId    = m.chat;
   const senderId  = m.sender;
-  const isAdmin   = (await getGroupAdmins(chatId)).includes(senderId);
 
   const hasMedia =
     msg.imageMessage    ||
@@ -2000,50 +1324,57 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antimedia) {
     msg.locationMessage      ||
     msg.gifPlayback;
 
-  // If there's no media or user is admin, do nothing
-  if (!hasMedia || isAdmin) return;
+  // Perform antimedia action ONLY IF:
+  // 1. It contains any type of media (`hasMedia`)
+  // 2. The sender is NOT a group admin (`!isGroupAdmins`)
+  // 3. The sender is NOT the bot creator (`!isCreator`)
+  // 4. The message is NOT from the bot itself (`!m.key.fromMe`)
+  // 5. The bot IS an admin in the group (so it has permissions to delete/kick) (`isBotAdmins`)
+  if (hasMedia && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
+    const now = m.messageTimestamp * 1000;
+    global.mediaCounts[senderId] = global.mediaCounts[senderId] || { count: 0, lastTimestamp: 0 };
+    const userData = global.mediaCounts[senderId];
 
-  const now = m.messageTimestamp * 1000;
-  global.mediaCounts[senderId] = global.mediaCounts[senderId] || { count: 0, lastTimestamp: 0 };
-  const userData = global.mediaCounts[senderId];
-
-  if (now - userData.lastTimestamp <= 10000) {
-    userData.count++;
-  } else {
-    userData.count = 1;
-  }
-  userData.lastTimestamp = now;
-
-  // Delete the media message
-  await Matrix.sendMessage(chatId, {
-    delete: {
-      remoteJid: chatId,
-      fromMe: false,
-      id: m.key.id,
-      participant: m.key.participant
+    if (now - userData.lastTimestamp <= 10000) { // Cooldown of 10 seconds
+      userData.count++;
+    } else {
+      userData.count = 1; // Reset count if outside cooldown
     }
-  });
+    userData.lastTimestamp = now;
 
-  if (userData.count === 1) {
-    // First offense: warning
+    // Delete the media message
     await Matrix.sendMessage(chatId, {
-      text: `🚫 MEDIA BLOCKED\n\n@${senderId.split('@')[0]} *Only admins are allowed to send media in this group!*`,
-      contextInfo: { mentionedJid: [senderId] }
-    }, { quoted: m });
-  } else {
-    // Second offense: kick
-    try {
-      await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
+      delete: {
+        remoteJid: chatId,
+        fromMe: false,
+        id: m.key.id,
+        participant: m.key.participant
+      }
+    }).catch(e => {}); // No console log for deletion errors
+
+    if (userData.count <= 3) { // Warn for the 1st, 2nd, and 3rd offenses
+      // First, second, or third offense: warning
       await Matrix.sendMessage(chatId, {
-        text: `@${senderId.split('@')[0]} has been removed for repeatedly sending media.`,
+        text: `🚫 MEDIA BLOCKED (Attempt ${userData.count}/3 warnings)\n\n@${senderId.split('@')[0]} *Only admins are allowed to send media in this group!*`,
         contextInfo: { mentionedJid: [senderId] }
-      });
-      delete global.mediaCounts[senderId];
-    } catch (err) {
-      console.error('Error kicking user:', err);
+      }, { quoted: m }).catch(e => {}); // No console log for warning errors
+    } else if (userData.count >= 4) { // Kick on the 4th offense
+      // Fourth or subsequent offense: kick
+      try {
+        await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
+        await Matrix.sendMessage(chatId, {
+          text: `@${senderId.split('@')[0]} has been removed for repeatedly sending media (${userData.count} offenses).`,
+          contextInfo: { mentionedJid: [senderId] }
+        });
+        delete global.mediaCounts[senderId]; // Reset count after kick
+      } catch (err) {
+        // Inform the group if kicking fails
+        await m.reply(`Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${err.message}`);
+      }
     }
   }
 }
+
 //<================================================>//
 global.antivirusCounts = global.antivirusCounts || {};
 
@@ -2102,7 +1433,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antivirus) {
     }
   }
 }
-//<================================================>// 
+//<================================================>//
 global.videoCounts = global.videoCounts || {};
 
 if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antivideo) {
@@ -2110,17 +1441,22 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antivideo) {
   const chatId     = m.chat;
   const senderId   = m.sender;
   const isVideo    = msg.videoMessage;
-  const isAdmin    = (await getGroupAdmins(chatId)).includes(senderId);
 
-  if (isVideo && !isAdmin) {
+  // Perform antivideo action ONLY IF:
+  // 1. It is a video message (`isVideo`)
+  // 2. The sender is NOT a group admin (`!isGroupAdmins`)
+  // 3. The sender is NOT the bot creator (`!isCreator`)
+  // 4. The message is NOT from the bot itself (`!m.key.fromMe`)
+  // 5. The bot IS an admin in the group (so it has permissions to delete/kick) (`isBotAdmins`)
+  if (isVideo && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     const now       = m.messageTimestamp * 1000;
     global.videoCounts[senderId] = global.videoCounts[senderId] || { count: 0, lastTimestamp: 0 };
     const userData  = global.videoCounts[senderId];
 
-    if (now - userData.lastTimestamp <= 10000) {
+    if (now - userData.lastTimestamp <= 10000) { // Cooldown of 10 seconds
       userData.count++;
     } else {
-      userData.count = 1;
+      userData.count = 1; // Reset count if outside cooldown
     }
     userData.lastTimestamp = now;
 
@@ -2132,48 +1468,50 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antivideo) {
         id: m.key.id,
         participant: m.key.participant
       }
-    });
+    }).catch(e => {}); // No console log for deletion errors
 
-    if (userData.count === 1) {
-      // First offense: warning
+    if (userData.count <= 3) { // Warn for the 1st, 2nd, and 3rd offenses
+      // First, second, or third offense: warning
       await Matrix.sendMessage(chatId, {
-        text: `🚫 VIDEO BLOCKED\n\n@${senderId.split('@')[0]} *Only admins are allowed to send videos in this group!*`,
+        text: `🚫 VIDEO BLOCKED (Attempt ${userData.count}/3 warnings)\n\n@${senderId.split('@')[0]} *Only admins are allowed to send videos in this group!*`,
         contextInfo: { mentionedJid: [senderId] }
-      }, { quoted: m });
-    } else if (userData.count >= 2) {
-      // Second offense: kick and announce
+      }, { quoted: m }).catch(e => {}); // No console log for warning errors
+    } else if (userData.count >= 4) { // Kick on the 4th offense
+      // Fourth or subsequent offense: kick and announce
       try {
         await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
         await Matrix.sendMessage(chatId, {
-          text: `@${senderId.split('@')[0]} has been removed for repeatedly sending videos.`,
+          text: `@${senderId.split('@')[0]} has been removed for repeatedly sending videos (${userData.count} offenses).`,
           contextInfo: { mentionedJid: [senderId] }
         });
-        delete global.videoCounts[senderId];
+        delete global.videoCounts[senderId]; // Reset count after kick
       } catch (kickError) {
-        console.error('Error kicking user:', kickError);
+        // Inform the group if kicking fails
+        await m.reply(`Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${kickError.message}`);
       }
     }
   }
 }
+
 //<================================================>//
 global.audioCounts = global.audioCounts || {};
 
 if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiaudio) {
   const msg       = m.message || {};
   const chatId    = m.chat;
-  const senderId  = m.sender;
+  const senderId  = m.sender; // m.sender is the full JID
   const isAudio   = msg.audioMessage;
-  const isAdmin   = (await getGroupAdmins(chatId)).includes(senderId);
 
-  if (isAudio && !isAdmin) {
+
+  if (isAudio && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     const now      = m.messageTimestamp * 1000;
     global.audioCounts[senderId] = global.audioCounts[senderId] || { count: 0, lastTimestamp: 0 };
     const userData = global.audioCounts[senderId];
 
-    if (now - userData.lastTimestamp <= 10000) {
+    if (now - userData.lastTimestamp <= 10000) { // Cooldown of 10 seconds
       userData.count++;
     } else {
-      userData.count = 1;
+      userData.count = 1; // Reset count if outside cooldown
     }
     userData.lastTimestamp = now;
 
@@ -2185,14 +1523,15 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiaudio) {
         id: m.key.id,
         participant: m.key.participant
       }
-    });
+    }).catch(e => console.error(`[ANTIAUDIO] Error deleting audio from ${senderId.split('@')[0]}:`, e)); // Error handling
+
 
     if (userData.count === 1) {
       // First offense: warning
       await Matrix.sendMessage(chatId, {
         text: `🚫 AUDIO BLOCKED\n\n@${senderId.split('@')[0]} *Only admins are allowed to send audios in this group!*`,
         contextInfo: { mentionedJid: [senderId] }
-      }, { quoted: m });
+      }, { quoted: m }).catch(e => console.error(`[ANTIAUDIO] Error sending warning to ${senderId.split('@')[0]}:`, e)); // Error handling
     } else {
       // Second offense: kick and announce
       try {
@@ -2203,11 +1542,14 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiaudio) {
         });
         delete global.audioCounts[senderId];
       } catch (kickError) {
-        console.error('Error kicking user:', kickError);
+        console.error('[ANTIAUDIO] Error kicking user:', kickError); // Kept for actual errors
+        // Reply to the group if kicking fails, useful for debugging bot permissions
+        await m.reply(`[ANTIAUDIO] Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${kickError.message}`);
       }
     }
   }
 }
+
 //<================================================>//
 global.imageCounts = global.imageCounts || {};
 
@@ -2215,10 +1557,10 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiimage) {
   const msg       = m.message || {};
   const chatId    = m.chat;
   const senderId  = m.sender;
-  const isAdmin   = (await getGroupAdmins(chatId)).includes(senderId);
   const isImage   = msg.imageMessage;
 
-  if (isImage && !isAdmin && !isBotAdmins && !isCreator) {
+  
+  if (isImage && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     const now = m.messageTimestamp * 1000;
     global.imageCounts[senderId] = global.imageCounts[senderId] || { count: 0, lastTimestamp: 0 };
     const userData = global.imageCounts[senderId];
@@ -2238,29 +1580,32 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiimage) {
         id: m.key.id,
         participant: m.key.participant
       }
-    });
+    }).catch(e => console.error(`Error deleting image from ${senderId.split('@')[0]}:`, e));
 
-    if (userData.count === 1) {
-      // First offense: warning
+    if (userData.count <= 3) { // Warn for the 1st, 2nd, and 3rd offenses
+      // First, second, or third offense: warning
       await Matrix.sendMessage(chatId, {
-        text: `🚫 IMAGE BLOCKED\n\n@${senderId.split('@')[0]} *Only admins are allowed to send images in this group!*`,
+        text: `🚫 IMAGE BLOCKED (Attempt ${userData.count}/3 warnings)\n\n@${senderId.split('@')[0]} *Only admins are allowed to send images in this group!*`,
         contextInfo: { mentionedJid: [senderId] }
-      }, { quoted: m });
-    } else if (userData.count >= 2) {
-      // Second offense: kick
+      }, { quoted: m }).catch(e => console.error(`Error sending warning to ${senderId.split('@')[0]}:`, e));
+    } else if (userData.count >= 4) { // Kick on the 4th offense
+      // Fourth or subsequent offense: kick
       try {
         await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
         await Matrix.sendMessage(chatId, {
-          text: `@${senderId.split('@')[0]} has been removed for repeatedly sending images.`,
+          text: `@${senderId.split('@')[0]} has been removed for repeatedly sending images (${userData.count} offenses).`,
           contextInfo: { mentionedJid: [senderId] }
         });
-        delete global.imageCounts[senderId];
+        delete global.imageCounts[senderId]; // Reset count after kick
       } catch (err) {
         console.error('Error kicking user:', err);
+        // Reply to the group if kicking fails, useful for debugging bot permissions
+        await m.reply(`Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${err.message}`);
       }
     }
   }
 }
+
 //<================================================>//
 global.stickerCounts = global.stickerCounts || {};
 
@@ -2268,18 +1613,23 @@ if (m.chat.endsWith("@g.us") && db.data.chats[m.chat]?.antisticker) {
   const msg       = m.message || {};
   const chatId    = m.chat;
   const senderId  = m.sender;
-  const isAdmin   = (await getGroupAdmins(chatId)).includes(senderId);
-
   const isSticker = msg.stickerMessage;
-  if (isSticker && !isAdmin) {
+
+  // Exemption logic: A sticker message will be acted upon ONLY IF:
+  // 1. It is a sticker message (`isSticker`)
+  // 2. The sender is NOT a group admin (`!isGroupAdmins`)
+  // 3. The sender is NOT the bot creator (`!isCreator`)
+  // 4. The message is NOT from the bot itself (`!m.key.fromMe`)
+  // 5. The bot IS an admin in the group (`isBotAdmins`)
+  if (isSticker && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     const now = m.messageTimestamp * 1000;
     global.stickerCounts[senderId] = global.stickerCounts[senderId] || { count: 0, lastTimestamp: 0 };
-
     const userData = global.stickerCounts[senderId];
-    if (now - userData.lastTimestamp <= 10000) {
+
+    if (now - userData.lastTimestamp <= 10000) { // Cooldown of 10 seconds
       userData.count++;
     } else {
-      userData.count = 1;
+      userData.count = 1; // Reset count if outside cooldown
     }
     userData.lastTimestamp = now;
 
@@ -2291,29 +1641,32 @@ if (m.chat.endsWith("@g.us") && db.data.chats[m.chat]?.antisticker) {
         id: m.key.id,
         participant: m.key.participant
       }
-    });
+    }).catch(e => console.error(`Error deleting sticker from ${senderId.split("@")[0]}:`, e));
 
-    if (userData.count === 1) {
-      // First offense: warning
+    if (userData.count <= 3) { // Warn for the 1st, 2nd, and 3rd offenses
+      // First, second, or third offense: warning
       await Matrix.sendMessage(chatId, {
-        text: `STICKER BLOCKED\n\n@${senderId.split("@")[0]} *Only admins are allowed to send stickers in this group!*`,
+        text: `STICKER BLOCKED (Attempt ${userData.count}/3 warnings)\n\n@${senderId.split("@")[0]} *Only admins are allowed to send stickers in this group!*`,
         contextInfo: { mentionedJid: [senderId] }
-      }, { quoted: m });
-    } else if (userData.count >= 2) {
-      // Second offense: kick
+      }, { quoted: m }).catch(e => console.error(`Error sending warning to ${senderId.split("@")[0]}:`, e));
+    } else if (userData.count >= 4) { // Kick on the 4th offense
+      // Fourth or subsequent offense: kick
       try {
         await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
         await Matrix.sendMessage(chatId, {
-          text: `@${senderId.split("@")[0]} has been kicked for repeatedly sending stickers.`,
+          text: `@${senderId.split("@")[0]} has been kicked for repeatedly sending stickers (${userData.count} offenses).`,
           contextInfo: { mentionedJid: [senderId] }
         });
-        delete global.stickerCounts[senderId];
+        delete global.stickerCounts[senderId]; // Reset count after kick
       } catch (kickError) {
         console.error("Error kicking user:", kickError);
+        // Reply to the group if kicking fails, useful for debugging bot permissions
+        await m.reply(`Failed to kick @${senderId.split("@")[0]}. Please check bot permissions. Error: ${kickError.message}`);
       }
     }
   }
 }
+
 //<================================================>//
 global.antivirtexCounts = global.antivirtexCounts || {};
 
@@ -2322,38 +1675,47 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antivirtex) {
   const chatId    = m.chat;
   const senderId  = m.sender;
   const text      = msg.conversation || msg.extendedTextMessage?.text || '';
-  const isAdmin   = (await getGroupAdmins(chatId)).includes(senderId);
 
-  // Suspicious virtex check: long text or zero-width chars
   const ZWS_REGEX = /[\u2060\u200b\u200e\u202e\u202d]/;
-  if (!text || isAdmin || (text.length <= 4000 && !ZWS_REGEX.test(text))) return;
+  // A message is considered a virtex if it's excessively long OR contains zero-width spaces
+  const isVirtex = (text.length > 4000 || ZWS_REGEX.test(text));
 
-  // Track count (optional)
-  global.antivirtexCounts[senderId] = (global.antivirtexCounts[senderId] || 0) + 1;
+  // Perform antivirtex action ONLY IF:
+  // 1. It is a detected virtex message (`isVirtex`)
+  // 2. The sender is NOT a group admin (`!isGroupAdmins`)
+  // 3. The sender is NOT the bot creator (`!isCreator`)
+  // 4. The message is NOT from the bot itself (`!m.key.fromMe`)
+  // 5. The bot IS an admin in the group (so it has permissions to delete/kick) (`isBotAdmins`)
+  if (isVirtex && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
+    global.antivirtexCounts[senderId] = (global.antivirtexCounts[senderId] || 0) + 1; // Track offense count
 
-  try {
-    // Delete the offending message
-    await Matrix.sendMessage(chatId, {
-      delete: {
-        remoteJid: chatId,
-        fromMe: false,
-        id: m.key.id,
-        participant: m.key.participant
-      }
-    });
+    try {
+      // Delete the offending message
+      await Matrix.sendMessage(chatId, {
+        delete: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: m.key.id,
+          participant: m.key.participant
+        }
+      }).catch(e => console.error(`Error deleting virtex from ${senderId.split('@')[0]}:`, e));
 
-    // Kick the sender
-    await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
+      // Kick the sender
+      await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
 
-    // Announce removal
-    await Matrix.sendMessage(chatId, {
-      text: `🚫 @${senderId.split('@')[0]} removed for sending a crash message.`,
-      contextInfo: { mentionedJid: [senderId] }
-    });
-  } catch (err) {
-    console.error('Error enforcing antivirtex:', err);
+      // Announce removal
+      await Matrix.sendMessage(chatId, {
+        text: `🚫 @${senderId.split('@')[0]} removed for sending a crash message.`,
+        contextInfo: { mentionedJid: [senderId] }
+      });
+    } catch (err) {
+      console.error('Error enforcing antivirtex:', err);
+      // Inform the group if kicking fails
+      await m.reply(`Failed to enforce antivirtex on @${senderId.split('@')[0]}. Please check bot permissions. Error: ${err.message}`);
+    }
   }
 }
+
 //<================================================>/
 global.spamCounts = global.spamCounts || {};
 
@@ -2361,9 +1723,9 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam) {
   const chatId   = m.chat;
   const senderId = m.sender;
   const now      = m.messageTimestamp * 1000;
-  const isAdmin  = (await getGroupAdmins(chatId)).includes(senderId);
 
-  if (!isAdmin) {
+
+  if (!isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     global.spamCounts[senderId] = global.spamCounts[senderId] || {
       count: 0,
       lastTimestamp: 0,
@@ -2372,14 +1734,14 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam) {
     const userData = global.spamCounts[senderId];
 
     // Count messages in 3-second windows
-    if (now - userData.lastTimestamp <= 3000) {
+    if (now - userData.lastTimestamp <= 3000) { // If message is within 3 seconds of last one
       userData.count++;
     } else {
-      userData.count = 1;
+      userData.count = 1; // Reset count if outside the 3-second window
     }
     userData.lastTimestamp = now;
 
-    if (userData.count >= 5) {
+    if (userData.count >= 5) { // If 5 or more messages in 3 seconds, it's a spam offense
       userData.offenseCount++;
 
       // Delete the spam message
@@ -2390,31 +1752,33 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam) {
           id: m.key.id,
           participant: m.key.participant
         }
-      });
+      }).catch(e => console.error(`Error deleting spam from ${senderId.split('@')[0]}:`, e));
 
       if (userData.offenseCount === 1) {
         // First offense: warning
         await Matrix.sendMessage(chatId, {
           text: `⚠️ SPAM WARNING\n\n@${senderId.split('@')[0]} You're sending messages too fast. Please slow down or you'll be removed.`,
           contextInfo: { mentionedJid: [senderId] }
-        }, { quoted: m });
+        }, { quoted: m }).catch(e => console.error(`Error sending spam warning to ${senderId.split('@')[0]}:`, e));
 
-      } else {
-        // Second offense: kick
+      } else { // userData.offenseCount >= 2 (Second offense: kick)
         try {
           await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
           await Matrix.sendMessage(chatId, {
             text: `🚫 @${senderId.split('@')[0]} has been kicked for spamming.`,
             contextInfo: { mentionedJid: [senderId] }
           });
-          delete global.spamCounts[senderId];
+          delete global.spamCounts[senderId]; // Reset count after kick
         } catch (err) {
           console.error('Error kicking user:', err);
+          // Inform the group if kicking fails
+          await m.reply(`Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${err.message}`);
         }
       }
     }
   }
 }
+
 //<================================================>/
 global.antispam1Counts = global.antispam1Counts || {};
 
@@ -2422,9 +1786,9 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
   const chatId   = m.chat;
   const senderId = m.sender;
   const now      = m.messageTimestamp * 1000;
-  const isAdmin  = (await getGroupAdmins(chatId)).includes(senderId);
 
-  if (!isAdmin) {
+
+  if (!isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     const user = (global.antispam1Counts[senderId] =
       global.antispam1Counts[senderId] || {
         count: 0,
@@ -2434,9 +1798,9 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
         unblockTimer: null
       });
 
-    // Still in block window → delete 8th/9th or kick on 10th
+    // If user is currently in a "blocked" window (after 7th message)
     if (now <= user.blockedUntil) {
-      if (user.deleteCount < 2) {
+      if (user.deleteCount < 2) { // Delete up to 2 messages (8th and 9th messages)
         await Matrix.sendMessage(chatId, {
           delete: {
             remoteJid: chatId,
@@ -2444,35 +1808,41 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
             id: m.key.id,
             participant: m.key.participant
           }
-        });
+        }).catch(e => console.error(`Error deleting spam from ${senderId.split('@')[0]}:`, e));
         user.deleteCount++;
-      } else {
-        await Matrix.sendMessage(chatId, {
-          text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
-┃  🚫 *KICKED FOR SPAMMING* 🚫  
+      } else { // If delete count reaches 2 (10th message), kick the user
+        try {
+          await Matrix.sendMessage(chatId, {
+            text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
+┃  🚫 *KICKED FOR SPAMMING* 🚫
 ┣━━━━━━━━━━━━━━━━━━━━━━┫
 ┃ @${senderId.split("@")[0]} has been
 ┃ removed for repeated spamming.
 ┗━━━━━━━━━━━━━━━━━━━━━━┛`,
-          contextInfo: { mentionedJid: [senderId] }
-        });
-        await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
-        clearTimeout(user.unblockTimer);
-        delete global.antispam1Counts[senderId];
+            contextInfo: { mentionedJid: [senderId] }
+          }).catch(e => console.error(`Error sending kick message for ${senderId.split('@')[0]}:`, e));
+          await Matrix.groupParticipantsUpdate(chatId, [senderId], 'remove');
+          clearTimeout(user.unblockTimer); // Clear any pending unblock timer
+          delete global.antispam1Counts[senderId]; // Remove user from tracking
+        } catch (err) {
+          console.error('Error kicking user:', err);
+          // Inform the group if kicking fails
+          await m.reply(`Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${err.message}`);
+        }
       }
-      return;
+      return; // Stop further processing for this message if in blocked window
     }
 
-    // Rolling window count reset
+    // Rolling window count reset: if message comes after 10 seconds of inactivity
     if (now - user.lastTimestamp > 10000) {
-      user.count = 1;
-      user.deleteCount = 0;
+      user.count = 1; // Reset message count
+      user.deleteCount = 0; // Reset delete count
     } else {
-      user.count++;
+      user.count++; // Increment message count within the window
     }
     user.lastTimestamp = now;
 
-    // 6th message → warn
+    // 6th message in the window → send a warning
     if (user.count === 6) {
       const dateStr = new Date(now).toLocaleDateString('en-US', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -2484,7 +1854,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
       });
       await Matrix.sendMessage(chatId, {
         text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
-┃  ⚠️ *SPAM WARNING* ⚠️  
+┃  ⚠️ *SPAM WARNING* ⚠️
 ┣━━━━━━━━━━━━━━━━━━━━━━┫
 ┃ @${senderId.split('@')[0]}, slow down—this is a warning.
 ┃
@@ -2494,19 +1864,19 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
 ┃ Your 7th msg will trigger a block.
 ┗━━━━━━━━━━━━━━━━━━━━━━┛`,
         contextInfo: { mentionedJid: [senderId] }
-      }, { quoted: m });
-      return;
+      }, { quoted: m }).catch(e => console.error(`Error sending spam warning to ${senderId.split('@')[0]}:`, e));
+      return; // Stop further processing for this message after warning
     }
 
-    // 7th message → block for 10 min & schedule unblock
+    // 7th message in the window → block for 10 min & schedule unblock
     if (user.count === 7) {
-      user.blockedUntil = now + 10 * 60 * 1000;
-      user.deleteCount = 0;
+      user.blockedUntil = now + 10 * 60 * 1000; // Set block duration for 10 minutes
+      user.deleteCount = 0; // Reset delete count for the new block window
       const dateStr = new Date(now).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Accra' });
       const timeStr = new Date(now).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Africa/Accra' });
       await Matrix.sendMessage(chatId, {
         text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
-┃  ⛔ *TEMP BLOCKED* ⛔  
+┃  ⛔ *TEMP BLOCKED* ⛔
 ┣━━━━━━━━━━━━━━━━━━━━━━┫
 ┃ @${senderId.split("@")[0]} blocked for 10 minutes.
 ┃ Messages 8 & 9 will be deleted,
@@ -2516,173 +1886,55 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antispam1) {
 ┃ ⏰ ${timeStr}
 ┗━━━━━━━━━━━━━━━━━━━━━━┛`,
         contextInfo: { mentionedJid: [senderId] }
-      });
+      }).catch(e => console.error(`Error sending temp block message to ${senderId.split('@')[0]}:`, e));
+
+      // Schedule unblock after the `blockedUntil` time
       user.unblockTimer = setTimeout(async () => {
         const liftT = user.blockedUntil;
         const liftDate = new Date(liftT);
         const unblockDateStr = liftDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Africa/Accra' });
         const unblockTimeStr = liftDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Africa/Accra' });
+        
+        // Notify group that user is unblocked
         await Matrix.sendMessage(chatId, { text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
-┃  ✅ *BLOCK LIFTED* ✅  
+┃  ✅ *BLOCK LIFTED* ✅
 ┣━━━━━━━━━━━━━━━━━━━━━━┫
 ┃ @${senderId.split("@")[0]} is now unblocked.
 ┃ Please avoid spamming again.
 ┃
 ┃ 📅 ${unblockDateStr}
 ┃ ⏰ ${unblockTimeStr}
-┗━━━━━━━━━━━━━━━━━━━━━━┛` });
+┗━━━━━━━━━━━━━━━━━━━━━━┛` }).catch(e => console.error(`Error sending unblock message to group for ${senderId.split('@')[0]}:`, e));
+        
+        // Also send a private message to the unblocked user
         await Matrix.sendMessage(senderId, { text: `┏━━━━━━━━━━━━━━━━━━━━━━┓
-┃  ✅ *BLOCK LIFTED* ✅  
+┃  ✅ *BLOCK LIFTED* ✅
 ┣━━━━━━━━━━━━━━━━━━━━━━┫
 ┃ You're now unblocked.
 ┃ Please avoid spamming again.
 ┃
 ┃ 📅 ${unblockDateStr}
 ┃ ⏰ ${unblockTimeStr}
-┗━━━━━━━━━━━━━━━━━━━━━━┛` });
-        delete global.antispam1Counts[senderId];
+┗━━━━━━━━━━━━━━━━━━━━━━┛` }).catch(e => console.error(`Error sending unblock message to ${senderId.split('@')[0]} in DM:`, e));
+        
+        delete global.antispam1Counts[senderId]; // Remove user from tracking after unblock
       }, user.blockedUntil - now);
-      return;
-    }
-  }
-}
-//<================================================>//
-if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkgc) {
-    const groupLinkRegex = /(?:https?:\/\/)?chat\.whatsapp\.com\/\S+/i; 
-
-    if (m.message && groupLinkRegex.test(budy)) {
-        if (isAdmins || isCreator || !isBotAdmins) return; 
-
-        await Matrix.sendMessage(m.chat, {
-            delete: {
-                remoteJid: m.chat,
-                fromMe: false,
-                id: m.key.id,
-                participant: m.key.participant,
-            },
-        });
-    }
-}
-//<================================================>//
-const { commandEmojis, messageEmojis } = require("./lib/emojis");
-
-const randomCommandEmoji = commandEmojis[Math.floor(Math.random() * commandEmojis.length)];
-const randomMessageEmoji = messageEmojis[Math.floor(Math.random() * messageEmojis.length)];
-
-// Cooldown map to track last reaction time per chat
-const reactionCooldowns = new Map();
-const REACTION_COOLDOWN_MS = 10000; // 10 seconds (10000 milliseconds)
-
-if (isCmd && db.data.settings.autoreact === "command") {
-  // Check cooldown before sending reaction
-  if (!reactionCooldowns.has(m.chat) || (Date.now() - reactionCooldowns.get(m.chat) > REACTION_COOLDOWN_MS)) {
-    try {
-      await Matrix.sendMessage(m.key.remoteJid, {
-        react: {
-          text: randomCommandEmoji,
-          key: m.key
-        }
-      });
-      reactionCooldowns.set(m.chat, Date.now()); // Update last reaction time
-    } catch (err) {
-      console.error("❌ Error sending command reaction:", err);
-    }
-  }
-} else if (m.message) {
-  // Check cooldown before sending reaction
-  if (!reactionCooldowns.has(m.chat) || (Date.now() - reactionCooldowns.get(m.chat) > REACTION_COOLDOWN_MS)) {
-    try {
-      const mode = db.data.settings.autoreact;
-      if (
-        mode === "all" ||
-        (mode === "group" && m.isGroup) ||
-        (mode === "pm" && !m.isGroup)
-      ) {
-        await Matrix.sendMessage(m.key.remoteJid, {
-          react: {
-            text: randomMessageEmoji,
-            key: m.key
-          }
-        });
-        reactionCooldowns.set(m.chat, Date.now()); // Update last reaction time
-      }
-    } catch (err) {
-      console.error("❌ Error sending message reaction:", err);
+      return; // Stop further processing for this message after blocking
     }
   }
 }
 
-
 //<================================================>//
 
-if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkgckick) {
-  const groupLinkRegex = /(?:https?:\/\/)?chat\.whatsapp\.com\/\S+/i; 
-  
-    if (m.message && groupLinkRegex.test(budy)) {
-        if (isAdmins || isCreator || !isBotAdmins) return;
-    {
-        if (isAdmins || isCreator || !isBotAdmins) return;
-        await Matrix.sendMessage(m.chat, {
-            delete: {
-                remoteJid: m.chat,
-                fromMe: false,
-                id: m.key.id,
-                participant: m.key.participant,
-            },
-        });
-        Matrix.sendMessage(
-            from,
-            {
-                text: `GROUP LINK DETECTED\n\n@${m.sender.split("@")[0]} *Beware, group links are not allowed in this group!*`,
-                contextInfo: { mentionedJid: [m.sender] },
-            },
-            { quoted: m }
-        );
-      await Matrix.groupParticipantsUpdate(
-            m.chat,
-            [m.sender],
-            "remove"
-          );
-    }
-}
-}
-//<================================================>//
-if (from.endsWith('@g.us') && db.data.chats[m.chat].antilink) {
-    const linkRegex = /(?:https?:\/\/|www\.|t\.me\/|bit\.ly\/|tinyurl\.com\/|(?:[a-z0-9]+\.)+[a-z]{2,})(\/\S*)?/i;
-
-    const messageContent = 
-        m.message?.conversation ||
-        m.message?.extendedTextMessage?.text ||
-        m.message?.imageMessage?.caption ||
-        m.message?.videoMessage?.caption ||
-        m.message?.pollCreationMessageV3?.name ||
-        m.message?.protocolMessage?.editedMessage?.conversation ||
-        m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
-        m.message?.protocolMessage?.editedMessage?.imageMessage?.caption ||
-        m.message?.protocolMessage?.editedMessage?.videoMessage?.caption ||
-        m.message?.protocolMessage?.editedMessage || 
-        pollMessageData; 
-
-    if (messageContent && linkRegex.test(messageContent)) {
-        if (isAdmins || isCreator || !isBotAdmins) return; 
-
-        await Matrix.sendMessage(m.chat, {
-            delete: {
-                remoteJid: m.chat,
-                fromMe: false,
-                id: m.key.id,
-                participant: m.key.participant,
-            },
-        });
-    }
-}
-//<================================================>//
-if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkkick) {
+// This block handles the "kick" mode for antilinkgc
+if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkgckick) { // Note the check for antilinkgckick
     const linkRegex = /(?:https?:\/\/|www\.|t\.me\/|bit\.ly\/|tinyurl\.com\/|(?:[a-z0-9]+\.)+[a-z]{2,})(\/\S*)?/i;
 
     if (m.message && linkRegex.test(budy)) {
-        if (isAdmins || isCreator || !isBotAdmins) return; 
-      
+
+        if (isAdmins || isCreator || !isBotAdmins || m.key.fromMe) return;
+
+        // Delete the message
         await Matrix.sendMessage(m.chat, {
             delete: {
                 remoteJid: m.chat,
@@ -2691,6 +1943,8 @@ if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkkick) {
                 participant: m.key.participant,
             },
         });
+
+        // Send a warning message
         await Matrix.sendMessage(
             from,
             {
@@ -2699,21 +1953,114 @@ if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkkick) {
             },
             { quoted: m }
         );
-     await Matrix.groupParticipantsUpdate(
+
+        // Kick the participant
+        await Matrix.groupParticipantsUpdate(
             m.chat,
             [m.sender],
             "remove"
-          );
+        );
     }
 }
+
+// This block handles the "delete only" mode for antilinkgc
+if (from.endsWith('@g.us') && db.data.chats[m.chat].antilinkgc) {
+    
+    if (db.data.chats[m.chat].antilinkgckick) return;
+
+    const linkRegex = /(?:https?:\/\/|www\.|t\.me\/|bit\.ly\/|tinyurl\.com\/|(?:[a-z0-9]+\.)+[a-z]{2,})(\/\S*)?/i;
+
+    if (m.message && linkRegex.test(budy)) {
+
+        if (isAdmins || isCreator || !isBotAdmins || m.key.fromMe) return;
+
+        // Delete the message
+        await Matrix.sendMessage(m.chat, {
+            delete: {
+                remoteJid: m.chat,
+                fromMe: false,
+                id: m.key.id,
+                participant: m.key.participant,
+            },
+        });
+    }
+}
+
+//<======================================>// 
+// AUTOVIEWSTATUS // AUTOREACT ETC //
+const { commandEmojis, messageEmojis } = require("./lib/emojis"); // Keep this import
+
+const randomCommandEmoji = commandEmojis[Math.floor(Math.random() * commandEmojis.length)];
+const randomMessageEmoji = messageEmojis[Math.floor(Math.random() * messageEmojis.length)];
+
+
+const instanceAutoreactMode = botInstanceSettings.autoreact ?? global.db.data.settings.autoreact ?? false;
+
+
+if (instanceAutoreactMode !== false && m.key && m.key.remoteJid) {
+
+  // Check cooldown for general reactions for THIS BOT INSTANCE
+  const lastGeneralReactionTime = generalReactionCooldowns.get(botJid);
+  const now = Date.now();
+
+  if (lastGeneralReactionTime && (now - lastGeneralReactionTime < GENERAL_REACTION_COOLDOWN_MS)) {
+
+  } else {
+
+    let shouldReact = false;
+    let emojiToSend = randomMessageEmoji;
+
+    if (isCmd && instanceAutoreactMode === "command") {
+      shouldReact = true;
+      emojiToSend = randomCommandEmoji; // Use command emoji for command mode
+    } else if (m.message) { // Only process if it's a regular message
+      if (instanceAutoreactMode === "all") {
+        shouldReact = true;
+      } else if (instanceAutoreactMode === "group" && m.isGroup) {
+        shouldReact = true;
+      } else if (instanceAutoreactMode === "pm" && !m.isGroup) {
+        shouldReact = true;
+      }
+    }
+
+    if (shouldReact) {
+      try { // <-- ADDED TRY BLOCK FOR SEND MESSAGE
+        await Matrix.sendMessage(m.key.remoteJid, {
+          react: {
+            text: emojiToSend,
+            key: m.key
+          }
+        });
+        generalReactionCooldowns.set(botJid, now); 
+
+      } catch (err) { // <-- ADDED CATCH BLOCK FOR SEND MESSAGE
+        console.error("❌ Error sending general auto-reaction:", err);
+      }
+    }
+  }
+}
+//<================================================>//
+
 //<================================================>//
 // Anti Bad Words
 if (from.endsWith('@g.us') && db.data.chats[m.chat].badword) {
-    for (let bak of bad) {
-        let regex = new RegExp(`\\b${bak}\\b`, 'i'); 
+    // Get the bot instance JID for per-bot badwords list
+    const botJid = Matrix.user?.id || Matrix.user?.jid || Matrix.user || "default";
+    // Get the per-bot badwords list (defaults to empty array if not set for this bot)
+    const badwords = db.data.users[botJid]?.badwords || [];
+
+    for (let bak of badwords) {
+        let regex = new RegExp(`\\b${bak}\\b`, 'i'); // Use word boundary (\b) for exact word matching
         if (regex.test(budy)) {
-            if (isAdmins || isCreator || !isBotAdmins) return; 
-            
+            // Exemption logic: If the sender is a group admin, or the bot creator,
+            // or the message is from the bot itself, or if the bot is NOT an admin in the group (and thus cannot enforce the rule),
+            // then the message is ignored.
+            if (isGroupAdmins || isCreator || m.key.fromMe || !isBotAdmins) {
+                return; // Do not act if exempt
+            }
+
+            // If not exempt and a bad word is found:
+            // Delete the offending message
             await Matrix.sendMessage(m.chat, {
                 delete: {
                     remoteJid: m.chat,
@@ -2721,8 +2068,9 @@ if (from.endsWith('@g.us') && db.data.chats[m.chat].badword) {
                     id: m.key.id,
                     participant: m.key.participant,
                 },
-            });
+            }).catch(e => console.error(`Error deleting bad word message from ${m.sender.split("@")[0]}:`, e));
 
+            // Send a warning message to the group, mentioning the sender
             await Matrix.sendMessage(
                 from,
                 {
@@ -2732,50 +2080,60 @@ if (from.endsWith('@g.us') && db.data.chats[m.chat].badword) {
                     contextInfo: { mentionedJid: [m.sender] },
                 },
                 { quoted: m }
-            );
-            break;
-        }
-    }
-}
-//<================================================>//
-if (from.endsWith('@g.us') && db.data.chats[m.chat].badwordkick) {
-    for (let bak of bad) {
-        let regex = new RegExp(`\\b${bak}\\b`, 'i'); 
-        if (regex.test(budy)) {
-            if (isAdmins || isCreator || !isBotAdmins) return; 
+            ).catch(e => console.error(`Error sending bad word warning to ${m.sender.split("@")[0]}:`, e));
             
-            await Matrix.sendMessage(m.chat, {
-                delete: {
-                    remoteJid: m.chat,
-                    fromMe: false,
-                    id: m.key.id,
-                    participant: m.key.participant,
-                },
-            });
-
-            await Matrix.sendMessage(
-                from,
-                {
-                    text: `BAD WORD DETECTED\n\n@${
-                        m.sender.split("@")[0]
-                    } *You have been removed for using prohibited language!*`,
-                    contextInfo: { mentionedJid: [m.sender] },
-                },
-                { quoted: m }
-            );
-
-            await Matrix.groupParticipantsUpdate(
-                m.chat,
-                [m.sender],
-                "remove"
-            );
-            break; 
+            break; // Stop checking for other bad words once one is found and acted upon for efficiency
         }
     }
 }
+
+
 //<================================================>//
+
+const badwords = db.data.users[botJid]?.badwords || [];
+
+for (let bak of badwords) {
+    let regex = new RegExp(`\\b${bak}\\b`, 'i');
+    if (regex.test(budy)) {
+        if (isAdmins || isCreator || !isBotAdmins) return;
+
+        await Matrix.sendMessage(m.chat, {
+            delete: {
+                remoteJid: m.chat,
+                fromMe: false,
+                id: m.key.id,
+                participant: m.key.participant,
+            },
+        });
+
+        await Matrix.sendMessage(
+            from,
+            {
+                text: `BAD WORD DETECTED\n\n@${
+                    m.sender.split("@")[0]
+                } *You have been removed for using prohibited language!*`,
+                contextInfo: { mentionedJid: [m.sender] },
+            },
+            { quoted: m }
+        );
+
+        await Matrix.groupParticipantsUpdate(
+            m.chat,
+            [m.sender],
+            "remove"
+        );
+        break;
+    }
+}
+
+
 //<================================================>//
-if (global.alwaysonline === 'false') {
+
+// Individual Always Online Setting
+
+const instanceAlwaysOnline = botInstanceSettings.alwaysonline ?? global.db.data.settings.alwaysonline ?? false; // Default to true
+
+if (instanceAlwaysOnline === false) {
     if (m.message) {
         try {
             await Matrix.sendPresenceUpdate("unavailable", from);
@@ -2784,7 +2142,7 @@ if (global.alwaysonline === 'false') {
             console.error('Error sending unavailable presence update:', error);
         }
     }
-} else if (global.alwaysonline === 'true') {
+} else if (instanceAlwaysOnline === true) {
     if (m.message) {
         try {
             await Matrix.sendPresenceUpdate("available", from);
@@ -2795,74 +2153,280 @@ if (global.alwaysonline === 'false') {
     }
 }
 //=================================================//
-if (global.autoread === 'true') {
+
+//=================================================//
+//  auto read
+
+if (global.db.data.users[botJid]?.autoread) {
   Matrix.readMessages([m.key]);
 }
-//<================================================>//
+
+//<==============================================>//
+//  SAVE STATUS AND VIEWONCE WITH EMOJI
+
+// Check if sender is owner or premium user
+const isOwner = Array.isArray(global.owner) && global.owner.includes(m.sender);
+if (!isOwner && !isPremium(m.sender)) return; // Ignore if not owner or premium
+
+// --- CORRECTED ADDITION: This feature will now only trigger if it's NOT a group message ---
 if (
-    m.quoted && // Ensure m.quoted exists
-    (m.quoted.viewOnce || m.msg?.contextInfo?.quotedMessage) &&
-    (m.message?.conversation || m.message?.extendedTextMessage) &&
-    isCreator &&
-    ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "🥲", "🥹", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚", "😋", "😛", "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥸", "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🫣", "🤗", "🫡", "🤔", "🫢", "🤭", "🤫", "🤥", "😶", "😶‍🌫️", "😐", "😑", "😬", "🫠", "🙄", "😯", "😦", "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😵", "😵‍💫", "🫥", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👹", "👺", "🤡", "💩", "👻", "💀", "☠️", "👽", "👾", "🤖", "🎃", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾", "👋", "🤚", "🖐️", "✋", "🖖", "👌", "🤌", "🤏", "✌️", "🤞", "🫰", "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️", "👍", "👎", "✊", "👊", "🤛", "🤜", "👏", "🫶", "🙌", "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳", "💪", "🦾", "🦿", "🦵", "🦶", "👂", "🦻", "👃", "🧠", "🫀", "🫁", "🦷", "🦴", "👀", "👁️", "👅", "👄", "🫦", "👶", "🧒", "👦", "👧", "🧑", "👱", "👨", "🧔", "🧔‍♂️", "🧔‍♀️", "👨‍🦰", "👨‍🦱", "👨‍🦳", "👨‍🦲", "👩", "👩‍🦰", "👩‍🦱", "👩‍🦳", "👩‍🦲", "🧓", "👴", "👵", "🙍", "🙍‍♂️", "🙍‍♀️", "🙎", "🙎‍♂️", "🙎‍♀️", "🙅", "🙅‍♂️", "🙅‍♀️", "🙆", "🙆‍♂️", "🙆‍♀️", "💁", "💁‍♂️", "💁‍♀️", "🙋", "🙋‍♂️", "🙋‍♀️", "🧏", "🧏‍♂️", "🧏‍♀️", "🙇", "🙇‍♂️", "🙇‍♀️", "🤦", "🤦‍♂️", "🤦‍♀️", "🤷", "🤷‍♂️", "🤷‍♀️", "👮", "👮‍♂️", "👮‍♀️", "🕵️", "🕵️‍♂️", "🕵️‍♀️", "💂", "💂‍♂️", "💂‍♀️", "🥷", "👷", "👷‍♂️", "👷‍♀️", "🫅", "🤴", "👸", "👳", "👳‍♂️", "👳‍♀️", "👲", "🧕", "🤵", "🤵‍♂️", "🤵‍♀️", "👰", "👰‍♂️", "👰‍♀️", "🫃", "🫄", "🤰", "🤱", "👩‍🍼", "👨‍🍼", "🧑‍🍼", "👼", "🎅", "🧑‍🎄", "🦸", "🦸‍♂️", "🦸‍♀️", "🦹", "🦹‍♂️", "🦹‍♀️", "🧙", "🧙‍♂️", "🧙‍♀️", "🧚", "🧚‍♂️", "🧚‍♀️", "🧛", "🧛‍♂️", "🧛‍♀️", "🧜", "🧜‍♂️", "🧜‍♀️", "🧝", "🧝‍♂️", "🧝‍♀️", "🧞", "🧞‍♂️", "🧞‍♀️", "🧟", "🧟‍♂️", "🧟‍♀️", "🧌", "💆", "💆‍♂️", "💆‍♀️", "💇", "💇‍♂️", "💇‍♀️", "🚶", "🚶‍♂️", "🚶‍♀️", "🧍", "🧍‍♂️", "🧍‍♀️", "🧎", "🧎‍♂️", "🧎‍♀️", "🏃", "🏃‍♂️", "🏃‍♀️", "💃", "🕺", "🕴️", "👯", "👯‍♂️", "👯‍♀️", "🧖", "🧖‍♂️", "🧖‍♀️", "🧗", "🧗‍♂️", "🧗‍♀️", "🤺", "🏇", "⛷️", "🏂", "🏌️", "🏌️‍♂️", "🏌️‍♀️", "🏄", "🏄‍♂️", "🏄‍♀️", "🚣", "🚣‍♂️", "🚣‍♀️", "🏊", "🏊‍♂️", "🏊‍♀️", "⛹️", "⛹️‍♂️", "⛹️‍♀️", "🏋️", "🏋️‍♂️", "🏋️‍♀️", "🚴", "🚴‍♂️", "🚴‍♀️", "🚵", "🚵‍♂️", "🚵‍♀️", "🤸", "🤸‍♂️", "🤸‍♀️", "🤼", "🤼‍♂️", "🤼‍♀️", "🤽", "🤽‍♂️", "🤽‍♀️", "🤾", "🤾‍♂️", "🤾‍♀️", "🤹", "🤹‍♂️", "🤹‍♀️", "🧘", "🧘‍♂️", "🧘‍♀️", "🛀", "🛌", "🧑‍🤝‍🧑", "👭", "👫", "👬", "💏", "👩‍❤️‍💋‍👨", "👨‍❤️‍💋‍👨", "👩‍❤️‍💋‍👩", "💑", "👩‍❤️‍👨", "👨‍❤️‍👨", "👩‍❤️‍👩", "👪", "🧑‍👦", "🧑‍👧", "🧑‍👧‍👦", "🧑‍👦‍👦", "🧑‍👧‍👧", "👨‍👦", "👨‍👧", "👨‍👧‍👦", "👨‍👦‍👦", "👨‍👧‍👧", "👩‍👦", "👩‍👧", "👩‍👧‍👦", "👩‍👦‍👦", "👩‍👧‍👧", "🗣️", "👤", "👥", "🫂", "👣", "🧳", "🌂", "☂️", "🎃", "🧵", "🧶", "👓", "🕶️", "🥽", "🥼", "🦺", "👔", "👕", "👖", "🧣", "🧤", "🧥", "🧦", "👗", "👘", "🥻", "🩱", "🩲", "🩳", "👙", "👚", "👛", "👜", "👝", "🎒", "🩴", "👞", "👟", "🥾", "🥿", "👠", "👡", "👢", "👑", "👒", "🎩", "🎓", "🧢", "🪖", "⛑️", "📿", "💄", "💍", "💎", "🐵", "🐒", "🦍", "🦧", "🐶", "🐕", "🦮", "🐕‍🦺", "🐩", "🐺", "🦊", "🦝", "🐱"].some((emoji) => m.body.startsWith(emoji))
+    m.quoted && // Ensure a message is being replied to
+    (/^[\p{Emoji}]$/u.test(budy)) && // Check if the message you sent is exactly one emoji character
+    !m.isGroup // <-- THIS IS THE CORRECT PLACEMENT: Only proceed if it's NOT a group message
 ) {
     (async () => {
         try {
-            let msg = m.msg?.contextInfo?.quotedMessage;
-            if (!msg) return console.log('Quoted message not found.');
+            let messageToDownload = null;
+            let messageType = null;
+            let caption = "🌹Here's the status you saved!🥂"; // Default caption
 
-            let type = Object.keys(msg)[0];
-            if (!type || !/image|video/.test(type)) {
-                console.log('*Invalid media type!*');
+            if (m.quoted.message?.imageMessage) {
+                messageToDownload = m.quoted.message.imageMessage;
+                messageType = 'image';
+                caption = m.quoted.message.imageMessage.caption || caption;
+            } else if (m.quoted.message?.videoMessage) {
+                messageToDownload = m.quoted.message.videoMessage;
+                messageType = 'video';
+                caption = m.quoted.message.videoMessage.caption || caption;
+            } else if (m.quoted.message?.audioMessage) {
+                messageToDownload = m.quoted.message.audioMessage;
+                messageType = 'audio';
+            } else if (m.quoted.message?.viewOnceMessage) {
+                const viewOnceMsg = m.quoted.message.viewOnceMessage.message;
+                if (viewOnceMsg?.imageMessage) {
+                    messageToDownload = viewOnceMsg.imageMessage;
+                    messageType = 'image';
+                    caption = viewOnceMsg.imageMessage.caption || caption;
+                } else if (viewOnceMsg?.videoMessage) {
+                    messageToDownload = viewOnceMsg.videoMessage;
+                    messageType = 'video';
+                    caption = viewOnceMsg.videoMessage.caption || caption;
+                } else if (viewOnceMsg?.audioMessage) {
+                    messageToDownload = viewOnceMsg.audioMessage;
+                    messageType = 'audio';
+                }
+            }
+
+            if (!messageToDownload || !messageType) {
+                return; // silently stop if no media found
+            }
+
+            let buffer = Buffer.from([]);
+            try {
+                const stream = await downloadContentFromMessage(messageToDownload, messageType);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            } catch (e) {
+                await Matrix.sendMessage(m.sender, {
+                    text: "❌ Error: Unable to download media. It may have expired or is not accessible to this bot session."
+                });
+                return;
+            }
+            if (!buffer.length) {
+                await Matrix.sendMessage(m.sender, {
+                    text: "❌ Error: Media could not be saved (buffer is empty)."
+                });
                 return;
             }
 
-            const media = await downloadContentFromMessage(
-                msg[type],
-                type === 'imageMessage' ? 'image' : 'video'
-            );
-
-            const bufferArray = [];
-            for await (const chunk of media) {
-                bufferArray.push(chunk);
+            try {
+                if (messageType === 'image') {
+                    await Matrix.sendMessage(m.sender, { image: buffer, caption });
+                } else if (messageType === 'video') {
+                    await Matrix.sendMessage(m.sender, { video: buffer, caption });
+                } else if (messageType === 'audio') {
+                    await Matrix.sendMessage(m.sender, { audio: buffer, mimetype: 'audio/mp4' });
+                }
+            } catch (err) {
+                await Matrix.sendMessage(m.sender, {
+                    text: "❌ Error: Could not send media to your DM. Please make sure you have started a chat with this bot and have it saved in your contacts."
+                });
             }
-
-            const buffer = Buffer.concat(bufferArray);
-
-            await Matrix.sendMessage(
-                Matrix.user.id,
-                type === 'videoMessage'
-                    ? { video: buffer, caption: global.wm }
-                    : { image: buffer, caption: global.wm },
-                { quoted: m }
-            );
-
-            bufferArray.length = 0;
-            buffer.fill(0);
-            msg = null;
-
         } catch (err) {
-            console.error('Error processing media:', err);
+            await Matrix.sendMessage(m.sender, {
+                text: "❗ Fatal error: " + err.message
+            });
         }
     })();
-} else if (
-   m.message &&
-   m.message.extendedTextMessage?.contextInfo?.quotedMessage &&
-   m.quoted && 
-    !command &&
-    isCreator &&
-    m.quoted.chat === 'status@broadcast' // This line can now safely access m.quoted.chat
+}
+
+//<==============================================>//
+
+
+// SAVE STATUS AND VIEWONCE WITH STICKER
+
+if (
+    m.quoted &&
+    m.message?.stickerMessage &&
+    (
+        m.quoted.message?.imageMessage ||
+        m.quoted.message?.videoMessage ||
+        m.quoted.message?.audioMessage ||
+        m.quoted.message?.viewOnceMessage
+    ) &&
+    !m.isGroup // <-- Added this condition: only run if NOT in a group
+) {
+    (async () => {
+        try {
+            let messageToDownload = null;
+            let messageType = null;
+            let caption = "💾 Here's the media you saved with a sticker! ✨";
+
+            if (m.quoted.message?.imageMessage) {
+                messageToDownload = m.quoted.message.imageMessage;
+                messageType = 'image';
+                caption = m.quoted.message.imageMessage.caption || caption;
+            } else if (m.quoted.message?.videoMessage) {
+                messageToDownload = m.quoted.message.videoMessage;
+                messageType = 'video';
+                caption = m.quoted.message.videoMessage.caption || caption;
+            } else if (m.quoted.message?.audioMessage) {
+                messageToDownload = m.quoted.message.audioMessage;
+                messageType = 'audio';
+            } else if (m.quoted.message?.viewOnceMessage) {
+                const viewOnceMsg = m.quoted.message.viewOnceMessage.message;
+                if (viewOnceMsg?.imageMessage) {
+                    messageToDownload = viewOnceMsg.imageMessage;
+                    messageType = 'image';
+                    caption = viewOnceMsg.imageMessage.caption || caption;
+                } else if (viewOnceMsg?.videoMessage) {
+                    messageToDownload = viewOnceMsg.videoMessage;
+                    messageType = 'video';
+                    caption = viewOnceMsg.videoMessage.caption || caption;
+                } else if (viewOnceMsg?.audioMessage) {
+                    messageToDownload = viewOnceMsg.audioMessage;
+                    messageType = 'audio';
+                }
+            }
+
+            // If for some reason we still don't have a media, just return silently (NO DM, NO CHAT MSG)
+            if (!messageToDownload || !messageType) return;
+
+            let buffer = Buffer.from([]);
+            try {
+                const stream = await downloadContentFromMessage(messageToDownload, messageType);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            } catch (e) {
+                await Matrix.sendMessage(m.sender, {
+                    text: "❌ Error: Unable to download media. It may have expired or is not accessible to this bot session."
+                });
+                return;
+            }
+            if (!buffer.length) {
+                await Matrix.sendMessage(m.sender, {
+                    text: "❌ Error: Media could not be saved (buffer is empty)."
+                });
+                return;
+            }
+
+            // Send to the user's DM (m.sender)
+            try {
+                if (messageType === 'image') {
+                    await Matrix.sendMessage(m.sender, { image: buffer, caption });
+                } else if (messageType === 'video') {
+                    await Matrix.sendMessage(m.sender, { video: buffer, caption });
+                } else if (messageType === 'audio') {
+                    await Matrix.sendMessage(m.sender, { audio: buffer, mimetype: 'audio/mp4' });
+                }
+                // No reaction, no chat message!
+            } catch (err) {
+                await Matrix.sendMessage(m.sender, {
+                    text: "❌ Error: Could not send media to your DM. Please make sure you have started a chat with this bot and have it saved in your contacts."
+                });
+            }
+        } catch (err) {
+            await Matrix.sendMessage(m.sender, {
+                text: "❗ Fatal error: " + err.message
+            });
+        }
+    })();
+}
+
+
+//=================================================//
+//=================================================//
+
+
+// The chatbot handler (which was previously in the removed Matrix.ev.on) should go here.
+// I'll put it back, adapting it to use the 'm' object passed to the main function.
+
+if (
+    global.db.data.settings.adizachat === true && // Changed from `chatbot` to `adizachat` as per your db.data.settings
+    (m.message.extendedTextMessage?.text || m.message.conversation) &&
+    !m.key.fromMe && // Use m.key.fromMe (true if bot sent it)
+    !m.isGroup && // Check if it's a private chat
+    !command // Only respond if it's not a command
 ) {
     try {
-        await m.quoted.copyNForward(Matrix.user.id, true);
+        const userId = m.sender;
+        const userMessage = m.message.extendedTextMessage?.text || m.message.conversation || '';
 
-        console.log('Status forwarded successfully!');
+        if (!userMessage.trim()) {
+            return;
+        }
+
+        // --- Prevent duplicate replies for chatbot ---
+        if (lastProcessedMessageId[userId] === m.key.id) {
+            return; // Already responded to this message for chatbot
+        }
+        lastProcessedMessageId[userId] = m.key.id;
+        // --- END Prevent duplicate replies ---
+
+
+        await Matrix.sendPresenceUpdate('composing', m.chat);
+        await Matrix.sendMessage(m.chat, { react: { text: "⏱️", key: m.key } }); // LINE OF ERROR, THIS IS IT!
+
+        if (!chatHistory[userId]) chatHistory[userId] = [];
+
+        // Add user message to history
+        chatHistory[userId].push({ role: "user", content: userMessage.trim() });
+        // Limit history to last 6 messages (or whatever you prefer)
+        if (chatHistory[userId].length > 6) {
+            chatHistory[userId] = chatHistory[userId].slice(-6);
+        }
+
+        // Construct conversation for API (APIs might prefer different formats)
+        const conversation = chatHistory[userId]
+            .map(x => `${x.role}: ${x.content}`)
+            .join("\n");
+
+
+        const apiUrls = [
+            `https://api.siputzx.my.id/api/ai/gpt3?prompt=You%20are%20a%20helpful%20assistant&content=${encodeURIComponent(conversation)}`,
+            `https://api.siputzx.my.id/api/ai/meta-llama-33-70B-instruct-turbo?content=${encodeURIComponent(conversation)}`,
+            `https://bk9.fun/ai/jeeves-chat?q=${encodeURIComponent(userMessage.trim())}` // Using promptText directly for this API
+        ];
+
+        let responseText = null;
+
+        for (let i = 0; i < apiUrls.length; i++) {
+            try {
+                const res = await axios.get(apiUrls[i]);
+                const data = res.data;
+                if (data?.data || data?.BK9 || data?.response || data?.result) {
+                    responseText = data.data || data.BK9 || data.response || data.result;
+                    break;
+                }
+            } catch (e) {
+                console.error(`Chatbot API ${i + 1} failed:`, e.message);
+            }
+        }
+
+        if (responseText) {
+            chatHistory[userId].push({ role: "assistant", content: responseText });
+            await Matrix.sendMessage(m.chat, { text: responseText }, { quoted: m });
+            await Matrix.sendMessage(m.chat, { react: { text: "💬", key: m.key } });
+        } else {
+            await Matrix.sendMessage(m.chat, { text: "❌ Failed to get a valid response from the chatbot." }, { quoted: m });
+            await Matrix.sendMessage(m.chat, { react: { text: "✖️", key: m.key } });
+        }
+
     } catch (err) {
-        console.error('Error forwarding status:', err);
+        console.error("Chatbot handler error:", err);
+        await Matrix.sendMessage(m.chat, { text: "⚠️ An error occurred while processing the chatbot command." }, { quoted: m });
+        await Matrix.sendMessage(m.chat, { react: { text: "✖️", key: m.key } });
     }
 }
-//=================================================//;
-
+//<================================================>//
 
 //<================================================>//
 function loadBlacklist() {
@@ -2875,12 +2439,12 @@ const chatId = m.chat;
 const userId = m.key.remoteJid;
 const blacklist = loadBlacklist();
 
-if ((blacklist.blacklisted_numbers.includes(userId) || blacklist.blacklisted_numbers.includes(chatId)) 
+if ((blacklist.blacklisted_numbers.includes(userId) || blacklist.blacklisted_numbers.includes(chatId))
     && userId !== botNumber && !m.key.fromMe) {
     return;
 }
 //=================================================//
-if (["120363321302359713@g.us", "120363381188104117@g.us"].includes(m.chat)) {  
+if (["120363321302359713@g.us", "120363381188104117@g.us"].includes(m.chat)) {
     if (command && !isCreator && !m.key.fromMe) {
         return;
     }
@@ -2889,26 +2453,30 @@ if (["120363321302359713@g.us", "120363381188104117@g.us"].includes(m.chat)) {
 
 // Mode check: block commands based on mode
 if (isCmd) {
-  if (mode === "private" && !isCreator) {
-    // Private mode: only owner can run commands
+  // Retrieve sender's premium status for access bypass
+  const isSenderPremium = isPremium(m.sender); // Assuming isPremium is imported at the top
+
+  if (mode === "private" && !isCreator && !isSenderPremium) {
+    // Private mode: only creator and premium users can run commands
     return await Matrix.sendMessage(from, {
-      text: "⚠️ Bot is currently in *private* mode. Only the owner can use commands."
+      text: "⚠️ Your bot is currently in *private* mode. Only the owner and premium users can use commands."
     }, { quoted: m });
   }
-  if (mode === "group" && !m.isGroup && !isCreator) {
-    // Group only mode: block commands outside groups for non-owner
+  if (mode === "group" && !m.isGroup && !isCreator && !isSenderPremium) {
+    // Group only mode: block commands outside groups for non-owner/non-premium
     return await Matrix.sendMessage(from, {
-      text: "⚠️ Bot is currently in *group only* mode. Commands work only in groups."
+      text: "⚠️ Your bot is currently in *group only* mode. Commands work only in groups."
     }, { quoted: m });
   }
-  if (mode === "pm" && m.isGroup && !isCreator) {
-    // PM only mode: block commands in groups for non-owner
+  if (mode === "pm" && m.isGroup && !isCreator && !isSenderPremium) {
+    // PM only mode: block commands in groups for non-owner/non-premium
     return await Matrix.sendMessage(from, {
-      text: "⚠️ Bot is currently in *private chat only* mode. Commands work only in private chats."
+      text: "⚠️ Your bot is currently in *private chat only* mode. Commands work only in private chats."
     }, { quoted: m });
   }
-  // Public mode: allow all commands
+  // Public mode: allow all commands (no explicit `return` here)
 }
+
 
 // Mode status string for display
 const modeStatus = 
@@ -2917,7 +2485,8 @@ const modeStatus =
   mode === 'group' ? "Group Only" : 
   mode === 'pm' ? "PM Only" : "Unknown";
 
-//<================================================>// 
+
+//<================================================>//
 //================== [ FAKE REPLY ] ==================//
 const fkontak = {
 key: {
@@ -2941,26 +2510,26 @@ Matrix.sendMessage(m.chat, {
         }
       }, { quoted: m });
    }
-   
+
 const replys = async(teks) => {
 m.reply(teks);
 }
 
-const reply2 = async(teks) => { 
+const reply2 = async(teks) => {
 Matrix.sendMessage(m.chat, { text : teks,
 contextInfo: {
 mentionedJid: [m.sender],
-forwardingScore: 9999, 
-isForwarded: true, 
+forwardingScore: 9999,
+isForwarded: true,
 forwardedNewsletterMessageInfo: {
 newsletterJid: '120363305699578483@newsletter',
 serverMessageId: 20,
 newsletterName: '❃𝗔𝗗𝗜𝗭𝗔 𝗕𝗢𝗧'
 },
 externalAdReply: {
-title: "𝗔𝗗𝗜𝗭𝗔 𝗕𝗢𝗧", 
+title: "𝗔𝗗𝗜𝗭𝗔 𝗕𝗢𝗧",
 body: "",
-thumbnailUrl: "https://files.catbox.moe/vikf6c.jpg", 
+thumbnailUrl: "https://files.catbox.moe/vikf6c.jpg",
 sourceUrl: null,
 mediaType: 1
 }}}, { quoted : m })
@@ -3011,16 +2580,12 @@ const { pluginManager } = require('./index');
   fetchJson,
   acr,
   obfus,
-  from, // Redundant, 'from' is already in m, but kept for consistency
+  from,
   pushname,
   ephoto,
   loadBlacklist,
   mainOwner,
-  // ADD THESE NEW CONTEXT VARIABLES FOR ADIZACHAT MANAGEMENT --> START OF ADDITIONS
-  adizaUserStatesDb, // The global variable for user states
-  getUserApiState,   // The helper function to get user state
-  saveAdizaUserStates, // The helper function to save user states
-  AVAILABLE_APIS,    // The global object with all AI models
+
 }; // <-- This is the correct closing brace for the context object
 
 // Process commands
@@ -3129,7 +2694,7 @@ case "menu":
 
         let menu = "╭༺◈👸🌹ADIZATU🌹👸\n";
         menu += "│🇬🇭 *ᴏᴡɴᴇʀ* : " + ownername + "\n";
-        menu += "│⚡ *ᴘʀᴇғɪx* : [ " + global.db.data.settings.prefix + " ]\n";
+        menu += "│⚡ *ᴘʀᴇғɪx* : [ " + prefixz + " ]\n"; // <--- CORRECTED HERE
         menu += "│💻 *ʜᴏsᴛ* : " + os.platform() + "\n";
         menu += "│🧩 *ᴘʟᴜɢɪɴs* : " + totalCommands + "\n";
         menu += "│🚀 *ᴍᴏᴅᴇ* : " + modeStatus + "\n";
@@ -3180,16 +2745,24 @@ case "menu":
     const matrix = [matrix1, matrix2, matrix3, matrix4, matrix5][Math.floor(Math.random() * 5)];
 
     const startTime = performance.now();
-    await m.reply("🚀Loading...Adiza-Bot🌹");
+    await m.reply("🚀Loading...Adiza-Bot🌹"); // <--- THIS IS THE LINE 2551 ERROR IN YOUR SCREENSHOT
     const endTime = performance.now();
     const latensie = endTime - startTime;
 
     // Load plugins
     const plugins = loadMenuPlugins(path.resolve(__dirname, './src/Plugins'));
 
-    const menulist = generateMenu(plugins, ownername, global.db.data.settings.prefix, modeStatus, versions, latensie, readmore);
+    // --- CORRECTED CALL: Passes the `prefix` variable from above ---
+    const menulist = generateMenu(plugins, ownername, prefix, modeStatus, versions, latensie, readmore);
+    // --- END CORRECTED CALL ---
 
-    const menustyle = global.db.data.settings.menustyle || '2';
+
+// Get the menu style for the current bot instance, or fall back to global, then default
+const menustyle = db.data.users[Matrix.user.id]?.menustyle || global.db.data.settings.menustyle || '2';
+// ...
+
+
+
 
 
     if (menustyle === '1') {

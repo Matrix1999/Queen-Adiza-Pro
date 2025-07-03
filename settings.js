@@ -24,16 +24,23 @@ global.botname = process.env.BOT_NAME || 'Queen-Adiza'
 
 //--------------------[ TELEGRAM BOT SETTINGS ]----------------------//
 global.BOT_TOKEN = process.env.BOT_TOKEN || "8038555102:AAE63xWoeX2WVB_sDT46LzUiwZNpxaCvwQI" // Telegram bot token
+
 global.BOT_NAME = process.env.TELEGRAM_BOT_NAME || "AdizaPair_Bot" // Telegram bot name
+
 global.OWNER_NAME = process.env.TELEGRAM_OWNER_NAME || "@Matrixxxxxxxxx" // Telegram owner name with sign @
+
 global.OWNER = JSON.parse(process.env.TELEGRAM_OWNER_IDS || '["https://t.me/Matrixxxxxxxxx"]') // Telegram owner username list
+
 global.DEVELOPER = JSON.parse(process.env.TELEGRAM_DEVELOPER_IDS || '["853645999"]') // Telegram developer telegram id
+
 global.pp = process.env.BOT_PP_URL || 'https://files.catbox.moe/pa6ok8.jpg' // Telegram bot profile picture
 
 //-----------------[ OWNER NUMBER (WhatsApp) ]------------------//
 
-global.ownernumber = process.env.OWNER_NUMBER || '233593734312' //
-global.owner = JSON.parse(process.env.WHATSAPP_OWNER_NUMBERS || '["233593734312"]') // WhatsApp owner numbers
+//-----------------[ OWNER NUMBER (WhatsApp) ]------------------//
+global.ownernumber = process.env.OWNER_NUMBER || '233593734312' 
+
+global.owner = JSON.parse(process.env.WHATSAPP_OWNER_NUMBERS || '["233593734312@s.whatsapp.net"]')
 
 //-----------------[ OWNER NAME (WhatsApp) ]------------------//
 
@@ -56,6 +63,10 @@ global.dbToken = process.env.GITHUB_TOKEN || "";
 
 global.plink = process.env.PLINK || "https://www.instagram.com/heyits_matrix?igsh=YzljYTk1ODg3Zg---"
 
+//-----------------[ GLOBAL TIME ]--------------------//
+
+global.timezones = "Africa/Accra";
+
 //------------------[ WATERMARK ]--------------------//
 
 global.wm = process.env.GL_WM || "®𝘼𝙙𝙞𝙯𝙖𝙩𝙪🌹"
@@ -71,6 +82,14 @@ global.mess = {
   notadmin: '*This feature will work once you become an admin. A way of ensuring order!*',
   premium: '? This command is reserved for premium users. Please contact the owner to inquire about premium access.'
 }
+
+
+
+
+// Main owner number (as string)
+// WHATSAPP_OWNER_NUMBERS should contain full JIDs or be converted to them
+// Example: process.env.WHATSAPP_OWNER_NUMBERS = '["233593734312@s.whatsapp.net"]'
+ // WhatsApp owner numbers (as array of JIDs)
 
 
 //--------------------[ LANGUAGE (Telegram) ]-----------------------//

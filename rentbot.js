@@ -1,34 +1,70 @@
-const { default: makeWASocket, jidDecode, DisconnectReason, useMultiFileAuthState, Browsers, getContentType, proto, makeInMemoryStore, jidNormalizedUser } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, jidDecode, DisconnectReason, useMultiFileAuthState, Browsers, getContentType, proto, jidNormalizedUser, downloadContentFromMessage } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const fs = require("fs");
 const path = require("path");
 const chalk = require("chalk");
 const { Boom } = require("@hapi/boom");
+const axios = require("axios"); 
+const os = require('os'); 
+const moment = require("moment-timezone"); 
+const { runtime, smsg: smsgMyfunc } = require("./lib/myfunc"); // <<< MODIFIED: Import smsg from myfunc.js as smsgMyfunc
+const versions = require("./package.json").version;
 
+// --- GLOBAL SOCKET MAP ---
+global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
+
+// --- ADDED: extendWASocket import ---
+const extendWASocket = require('./lib/matrixUtils'); // Import the utility
+
+// --- STORE DEFINITION ---
 const store = {
-  messages: {}, // { [jid]: WebMessageInfo[] }
-  chats: {},    // { [jid]: Chat }
-  contacts: {}, // { [id]: Contact }
-
+  messages: {},
+  chats: {},
+  contacts: {},
   saveMessage(msg) {
-    const jid = msg.key.remoteJid
-    if (!this.messages[jid]) this.messages[jid] = []
-    this.messages[jid].push(msg)
+    const jid = msg.key.remoteJid;
+    if (!this.messages[jid]) this.messages[jid] = [];
+    this.messages[jid].push(msg);
   },
-
   saveChat(chat) {
-    this.chats[chat.id] = chat
+    this.chats[chat.id] = chat;
   },
-
   saveContact(contact) {
-    this.contacts[contact.id] = contact
+    this.contacts[contact.id] = contact;
+  },
+  loadMessage(jid, msgId) {
+    return this.messages[jid]?.find(msg => msg.key.id === msgId);
   }
+}
+
+const storeFile = "./src/store.json";
+function saveStoredMessages(chatId, messageId, messageData) {
+    let storedMessages = {};
+    if (fs.existsSync(storeFile)) {
+        try {
+            storedMessages = JSON.parse(fs.readFileSync(storeFile));
+        } catch (err) {
+            // console.error("⚠️ Error reading store.json in rentbot.js:", err); // Removed
+            storedMessages = {};
+        }
+    }
+    if (!storedMessages[chatId]) storedMessages[chatId] = {};
+    if (!storedMessages[chatId][messageId]) {
+        storedMessages[chatId][messageId] = messageData;
+        try {
+            fs.writeFileSync(storeFile, JSON.stringify(storedMessages, null, 2));
+        } catch (err) {
+            // console.error("❌ Error writing to store.json in rentbot.js:", err); // Removed
+        }
+        return true; // Return true if message was newly stored
+    }
+    return false; // Return false if message already existed or couldn't be stored
 }
 
 let pairingCodeErrorShown = false;
 const reconnectAttempts = {};
-const pairingRequested = {}; // Track pairing per number By яαgємσ∂ѕ
-const connectionNotified = {}; // NEW: Track if connection notification has been sent for this number
+const pairingRequested = {};
+const connectionNotified = {};
 
 function deleteFolderRecursive(folderPath) {
     if (fs.existsSync(folderPath)) {
@@ -40,32 +76,61 @@ function deleteFolderRecursive(folderPath) {
     }
 }
 
-async function startpairing(MatrixNumber) {
-    try {
-        const sessionPath = `./lib2/pairing/${MatrixNumber}`;
+// --- PREMIUM CHECK FUNCTION ---
+function isPremiumUser(MatrixNumber) {
+    const premiumUsers = (global.db && global.db.data && global.db.data.premium) ? global.db.data.premium : [];
+    return premiumUsers.some(p => p.jid === MatrixNumber);
+}
 
-        // --- FIX START ---
-        // Ensure the session directory exists before any file operations
+async function startpairing(MatrixNumber) {
+    // --- PREMIUM CHECK: Block non-premium users ---
+    if (!isPremiumUser(MatrixNumber)) {
+        // console.log(chalk.red(`[RENTPOT] Not starting session for ${MatrixNumber} (not premium).`)); // Removed
+        return;
+    }
+
+    try {
+        // Ensure base pairing directory exists to prevent ENOENT
+        const basePairingDir = path.join('./lib2', 'pairing');
+        if (!fs.existsSync(basePairingDir)) {
+            fs.mkdirSync(basePairingDir, { recursive: true });
+            // console.log(chalk.green(`[RENTPOT] Created missing base pairing directory: ${basePairingDir}`)); // Removed
+        }
+
+        const sessionPath = path.join(basePairingDir, MatrixNumber);
+
         if (!fs.existsSync(sessionPath)) {
             fs.mkdirSync(sessionPath, { recursive: true });
-            console.log(chalk.green(`[RENTPOT] Created missing session directory for ${MatrixNumber}: ${sessionPath}`));
+            // console.log(chalk.green(`[RENTPOT] Created missing session directory for ${MatrixNumber}: ${sessionPath}`)); // Removed
         }
-        // --- FIX END ---
 
-        if (!fs.existsSync(`${sessionPath}/creds.json`)) {
-            console.warn(chalk.yellow(`[${MatrixNumber}] No session found, starting fresh.`));
+        const credsFilePath = path.join(sessionPath, 'creds.json');
+        const pairingFilePath = path.join(sessionPath, 'pairing.json');
+
+        if (!fs.existsSync(credsFilePath)) {
+            // console.warn(chalk.yellow(`[${MatrixNumber}] No creds.json found, starting fresh.`)); // Removed
+        }
+
+        // Improved log: distinguish between first time and reuse
+        if (fs.existsSync(pairingFilePath)) {
+            const pairingData = JSON.parse(fs.readFileSync(pairingFilePath, 'utf-8'));
+            if (!fs.existsSync(credsFilePath)) {
+                // No creds.json means this is the first time pairing
+                // console.log(chalk.green(`[RENTPOT] Using newly generated pairing code for ${MatrixNumber}: ${pairingData.code}`)); // Removed
+            } else {
+                // creds.json exists, so this is a reuse
+                // console.log(chalk.blue(`[RENTPOT] Reusing existing pairing code for ${MatrixNumber}: ${pairingData.code}`)); // Removed
+            }
         }
 
         const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
         if (!state?.creds) {
-            console.warn(chalk.red(`[${MatrixNumber}] Invalid session state. Resetting.`));
+            // console.warn(chalk.red(`[${MatrixNumber}] Invalid session state. Resetting.`)); // Removed
             deleteFolderRecursive(sessionPath);
-            // After deleting, ensure the directory is re-created for the next attempt
-            // This is crucial if startpairing is immediately called again.
-            if (!fs.existsSync(sessionPath)) { 
+            if (!fs.existsSync(sessionPath)) {
                 fs.mkdirSync(sessionPath, { recursive: true });
-                console.log(chalk.green(`[RENTPOT] Re-created session directory after reset for ${MatrixNumber}: ${sessionPath}`));
+                // console.log(chalk.green(`[RENTPOT] Re-created session directory after reset for ${MatrixNumber}: ${sessionPath}`)); // Removed
             }
             return setTimeout(() => startpairing(MatrixNumber), 5000);
         }
@@ -74,38 +139,34 @@ async function startpairing(MatrixNumber) {
             logger: pino({ level: "silent" }),
             printQRInTerminal: false,
             auth: state,
-            version: [2, 3000, 1017531287], // Ensure this version is stable and up-to-date with Baileys recommendations
+            version: [2, 3000, 1017531287],
             browser: Browsers.ubuntu("Edge"),
             getMessage: async key => {
-                // Modified: Your `store` object is in-memory and not bound to Baileys events.
-                // This means store.loadMessage might not return actual messages from Baileys.
-                // Providing a fallback that attempts to fetch from the socket or returns empty proto.Message.
                 const jid = jidNormalizedUser(key.remoteJid);
-                // Attempt to load from store if you bind it, otherwise Baileys fetches (slower).
-                // If you bind the store (uncomment `store.bind(Matrix.ev)` below), this might work better.
                 let msg = await store.loadMessage(jid, key.id);
-                if (msg) return msg.message; // Return the message content if found in your store
-
-                // Fallback to fetching directly via Baileys if not in store (can be slow)
-                // Or you might need to implement a database for persistent message storage
+                if (msg) return msg?.message || "";
                 return key.id ? (await Matrix.fetchMessagesFromWA(key.remoteJid, [key])).messages[0]?.message || '' : '';
             },
             shouldSyncHistoryMessage: msg => {
-                console.log(`\x1b[32mLoading Chat [${msg.progress}%]\x1b[39m`);
+                // console.log(`\x1b[32mLoading Chat [${msg.progress}%]\x1b[39m`); // Removed
                 return !!msg.syncType;
             }
         });
 
-       // store.bind(Matrix.ev); // <--- CONSIDER UNCOMMENTING THIS if you want `store` to populate with messages and chats
+        // --- TRACK THE SOCKET GLOBALLY ---
+        global.activeSockets[MatrixNumber] = Matrix;
+
+        extendWASocket(Matrix);
 
         const keepAliveInterval = setInterval(() => {
             if (Matrix?.user) {
                 Matrix.sendPresenceUpdate('available').catch(err => {
-                    console.error("Keep-alive failed:", err.message);
+                    // console.error("Keep-alive failed:", err.message); // Removed
                 });
             }
         }, 1000 * 60 * 30);
 
+        // --- PAIRING CODE GENERATION LOGIC ---
         if (!state.creds.registered && MatrixNumber && !pairingRequested[MatrixNumber]) {
             pairingRequested[MatrixNumber] = true;
             const phoneNumber = MatrixNumber.replace(/[^0-9]/g, '');
@@ -114,37 +175,35 @@ async function startpairing(MatrixNumber) {
                 try {
                     let code = await Matrix.requestPairingCode(phoneNumber);
                     code = code?.match(/.{1,4}/g)?.join("-") || code;
-                    fs.writeFileSync(`./lib2/pairing/pairing.json`, JSON.stringify({ code }, null, 2));
+                    fs.writeFileSync(pairingFilePath, JSON.stringify({ code }, null, 2));
+                    // console.log(chalk.green(`[RENTPOT] Pairing code written to: ${pairingFilePath}`)); // Removed
                 } catch (err) {
                     if (!pairingCodeErrorShown) {
-                        console.error("Error requesting pairing code:", err.stack || err.message);
+                        // console.error("Error requesting pairing code:", err.stack || err.message); // Removed
                         pairingCodeErrorShown = true;
                     }
                 }
             }, 1703);
         }
 
-        Matrix.decodeJid = (jid) => {
-            if (!jid) return jid;
-            if (/:\d+@/gi.test(jid)) {
-                const decode = jidDecode(jid) || {};
-                return decode.user && decode.server && `${decode.user}@${decode.server}` || jid;
-            }
-            return jid;
-        };
-
         Matrix.ev.on("messages.upsert", async chatUpdate => {
             try {
                 const msg = chatUpdate.messages[0];
-                if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
-                const m = smsg(Matrix, msg, store);
+                if (!msg.message) return;
+
+                if (msg.key.remoteJid !== 'status@broadcast' && msg.message) {
+                     saveStoredMessages(msg.key.remoteJid, msg.key.id, msg);
+                }
+
+                // Call smsg from myfunc.js for system.js processing
+                const m = smsgMyfunc(Matrix, msg, store); // <<< MODIFIED: Using smsgMyfunc and passing 'store'
                 require("./system")(Matrix, m, chatUpdate, store);
             } catch (err) {
-                console.error("Error handling message:", err.stack || err.message);
+                // console.error("Error handling message:", err.stack || err.message); // Removed
             }
         });
 
-        const badSessionRetries = {}; // Track retries per number By яαgємσ∂ѕ
+        const badSessionRetries = {};
 
         Matrix.ev.on("connection.update", async update => {
             const { connection, lastDisconnect } = update;
@@ -153,71 +212,113 @@ async function startpairing(MatrixNumber) {
             try {
                 if (connection === "close") {
                     clearInterval(keepAliveInterval);
-                    // Reset notification flag when connection closes, so it can be sent again on next open
-                    connectionNotified[MatrixNumber] = false; 
+                    connectionNotified[MatrixNumber] = false;
+
+                    // --- REMOVE SOCKET FROM GLOBAL ON DISCONNECT ---
+                    if (global.activeSockets[MatrixNumber]) {
+                        delete global.activeSockets[MatrixNumber];
+                        // console.log(chalk.yellow(`[RENTPOT] Removed socket for ${MatrixNumber} from global.activeSockets.`)); // Removed
+                    }
+
+                    // --- PREMIUM CHECK: Prevent reconnect if not premium ---
+                    if (!isPremiumUser(MatrixNumber)) {
+                        // console.log(chalk.red(`[RENTPOT] Not reconnecting socket for ${MatrixNumber} (not premium).`)); // Removed
+                        return;
+                    }
 
                     switch (statusCode) {
                         case DisconnectReason.badSession:
                             badSessionRetries[MatrixNumber] = (badSessionRetries[MatrixNumber] || 0) + 1;
-
                             if (badSessionRetries[MatrixNumber] <= 6) {
-                                console.log(chalk.yellow(`[${MatrixNumber}] Bad session detected. Retrying (${badSessionRetries[MatrixNumber]}/6) without deleting session...`));
+
                                 pairingRequested[MatrixNumber] = false;
                                 return setTimeout(() => startpairing(MatrixNumber), 3000);
                             } else {
-                                console.log(chalk.red(`[${MatrixNumber}] Bad session retry limit reached. Deleting session and starting fresh.`));
+                                // console.log(chalk.red(`[${MatrixNumber}] Bad session retry limit reached. Deleting session and starting fresh.`)); // Removed
                                 deleteFolderRecursive(sessionPath);
-                                // Ensure directory is recreated after deletion for the next attempt
-                                if (!fs.existsSync(sessionPath)) { // Added this check and mkdirSync here too
+                                if (!fs.existsSync(sessionPath)) {
                                     fs.mkdirSync(sessionPath, { recursive: true });
-                                    console.log(chalk.green(`[RENTPOT] Re-created session directory after bad session reset for ${MatrixNumber}: ${sessionPath}`));
+
                                 }
                                 badSessionRetries[MatrixNumber] = 0;
                                 pairingRequested[MatrixNumber] = false;
                                 return setTimeout(() => startpairing(MatrixNumber), 5000);
                             }
-
                         case DisconnectReason.connectionClosed:
                         case DisconnectReason.connectionLost:
                         case DisconnectReason.restartRequired:
-                        case DisconnectReason.timedOut:
                         case 405:
+                        case DisconnectReason.timedOut:
                             reconnectAttempts[MatrixNumber] = (reconnectAttempts[MatrixNumber] || 0) + 1;
                             if (reconnectAttempts[MatrixNumber] <= 5) {
-                                console.log(`[${MatrixNumber}] attempting reconnect (${reconnectAttempts[MatrixNumber]}/5)...`);
+                                // console.log(`[${MatrixNumber}] attempting reconnect (${reconnectAttempts[MatrixNumber]}/5)...`); // Removed
                                 return setTimeout(() => startpairing(MatrixNumber), 2000);
                             } else {
-                                console.log(`[${MatrixNumber}] max reconnect attempts reached.`);
+                                // console.log(`[${MatrixNumber}] max reconnect attempts reached.`); // Removed
                             }
                             break;
-
                         case DisconnectReason.loggedOut:
+                            // --- USER LOGGED OUT: DELETE SESSION FOLDER, KEEP PREMIUM ---
                             deleteFolderRecursive(sessionPath);
-                            // Ensure directory is recreated after deletion for the next attempt
-                            if (!fs.existsSync(sessionPath)) { // Added this check and mkdirSync here too
-                                fs.mkdirSync(sessionPath, { recursive: true });
-                                console.log(chalk.green(`[RENTPOT] Re-created session directory after logout for ${MatrixNumber}: ${sessionPath}`));
-                            }
+                            // console.log(chalk.bgRed(`${MatrixNumber} logged out. Session folder deleted.`)); // Removed
                             pairingRequested[MatrixNumber] = false;
-                            console.log(chalk.bgRed(`${MatrixNumber} disconnected (logged out).`));
+                            // DO NOT remove premium from database!
                             break;
-
                         default:
-                            console.log("Unknown disconnect reason:", statusCode);
-                            console.error("Disconnect error:", lastDisconnect?.error?.stack || lastDisconnect?.error?.message);
-                            // For unknown errors, also ensure not to spam
-                            connectionNotified[MatrixNumber] = false; 
+                            connectionNotified[MatrixNumber] = false;
                     }
                 } else if (connection === "open") {
-                    console.log(chalk.bgGreen(`Rent bot is active on ${MatrixNumber}`));
+                    // console.log(chalk.bgGreen(`Rent bot is active on ${MatrixNumber}`)); // Removed
                     reconnectAttempts[MatrixNumber] = 0;
-                    badSessionRetries[MatrixNumber] = 0; // Reset on successful connection
-                    // Removed the section that sends "Connected: [Number]" notifications.
+                    badSessionRetries[MatrixNumber] = 0;
+
+                    // --- START ADDED CODE FOR RENT BOT STARTUP MESSAGE ---
+
+                    // Get specific settings for THIS rent bot instance from the database
+                    const rentBotInstanceJid = Matrix.user.id; // This is the JID of the rent bot itself
+                    // Ensure global.db is accessible (it should be if index.js runs first and sets it)
+                    const rentBotSettings = global.db.data.users[rentBotInstanceJid] || {};
+
+                    const instancePrefix = rentBotSettings.prefix ?? global.db.data.settings.prefix ?? '.';
+                    const instanceMode = rentBotSettings.mode ?? global.db.data.settings.mode ?? 'public';
+
+                    const modeStatus =
+                        instanceMode === 'public' ? "Public" :
+                        instanceMode === 'private' ? "Private" :
+                        instanceMode === 'group' ? "Group Only" :
+                        instanceMode === 'pm' ? "PM Only" : "Unknown";
+
+                    // The 'const updates = await checkForUpdates();' line is removed here.
+
+                    // Send the startup message to the rent bot's own JID (Matrix.user.id)
+                    await Matrix.sendMessage(Matrix.user.id, {
+                        text:
+                            "╭༺◈👸🌹𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔🌹👸\n" +
+                            "│📌 » *Username*: " + Matrix.user.name + "\n" +
+                            "│💻 » *Platform*: " + os.platform() + "\n" +
+                            "│⚡ » *Prefix*: [ " + instancePrefix + " ]\n" + 
+                            "│🚀 » *Mode*: " + modeStatus + "\n" +    
+                            `│🤖 » *Version*: [ ${versions} ]\n` +    
+                            "╰───━━━༺◈༻━━━───╯\n\n" + 
+
+                            "╭༺◈👑 *𝗕𝗢𝗧 𝗦𝗧𝗔𝗧𝗨𝗦* 👑◈༻╮\n" + 
+                            `│🕒 *Uptime*: ${runtime(process.uptime())}\n` +
+                            "╰───━━━༺◈༻━━━───╯\n\n" +
+
+                            "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" + 
+                            `│🗓️ ${moment.tz('Africa/Accra').format('dddd, DD MMMM')}\n` +    
+                            `│🕒 ${moment.tz('Africa/Accra').format('HH:mm:ss z')}\n` +                             `╰───━━━༺◈༻━━━───╯\n`
+                            
+                    }, {
+                        ephemeralExpiration: 1800 
+                    });
+// --- END ADDED CODE ---
+
+
                 }
             } catch (err) {
-                console.error("Connection update error:", err.stack || err.message);
-                // Ensure flag is reset in case of connection update error that leads to retry
-                connectionNotified[MatrixNumber] = false; 
+                // console.error("Connection update error:", err.stack || err.message); // Removed
+                connectionNotified[MatrixNumber] = false;
                 setTimeout(() => startpairing(MatrixNumber), 5000);
             }
         });
@@ -226,24 +327,25 @@ async function startpairing(MatrixNumber) {
             try {
                 await saveCreds();
             } catch (err) {
-                console.error("Failed to save credentials:", err.stack || err.message);
+                // console.error("Failed to save credentials:", err.stack || err.message); // Removed
             }
         });
     } catch (err) {
-        console.error("Fatal error in startpairing:", err.stack || err.message);
+        // console.error("Fatal error in startpairing:", err.stack || err.message); // Removed
         setTimeout(() => startpairing(MatrixNumber), 5000);
     }
 }
 
-function smsg(sock, m, store) {
-    const M = proto.WebMessageInfo;
+// --- ENHANCED & ROBUST SMSG FUNCTION (KEPT AS IS) ---
+function smsg(sock, m) { // This function remains named 'smsg' for internal rentbot.js dependencies
     if (!m) return m;
+
     m.id = m.key.id;
     m.isBaileys = m.id.startsWith('BAE5') && m.id.length === 16;
     m.chat = m.key.remoteJid;
     m.fromMe = m.key.fromMe;
     m.isGroup = m.chat.endsWith('@g.us');
-    m.sender = sock.decodeJid(m.fromMe && sock.user.id || m.participant || m.key.participant || m.chat || '');
+    m.sender = jidNormalizedUser(m.fromMe && sock.user.id || m.participant || m.key.participant || m.chat || '');
 
     if (m.message) {
         m.mtype = getContentType(m.message);
@@ -252,6 +354,88 @@ function smsg(sock, m, store) {
             : m.message[m.mtype];
 
         m.text = m.message?.conversation || m.msg?.caption || m.msg?.text || '';
+
+        // Add download helper to main message
+        m.download = async () => {
+            try {
+                const type = m.mtype;
+                if (!m.msg || !m.msg.mediaKey) {
+                    throw new Error("Media key missing. Please send a new image.");
+                }
+                const stream = await downloadContentFromMessage(m.msg, type.replace('Message', ''));
+                let buffer = Buffer.from([]);
+                for await (const chunk of stream) {
+                    buffer = Buffer.concat([buffer, chunk]);
+                }
+                return buffer;
+            } catch (e) {
+                return null;
+            }
+        };
+
+        // --- Robust Quoted Message Handling for ALL Types ---
+        let quoted = null, quotedInfo = null;
+        if (m.message?.stickerMessage?.contextInfo?.quotedMessage) {
+            quoted = m.message.stickerMessage.contextInfo.quotedMessage;
+            quotedInfo = m.message.stickerMessage.contextInfo;
+        } else if (m.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+            quoted = m.message.extendedTextMessage.contextInfo.quotedMessage;
+            quotedInfo = m.message.extendedTextMessage.contextInfo;
+        } else if (m.message?.imageMessage?.contextInfo?.quotedMessage) {
+            quoted = m.message.imageMessage.contextInfo.quotedMessage;
+            quotedInfo = m.message.imageMessage.contextInfo;
+        } else if (m.message?.videoMessage?.contextInfo?.quotedMessage) {
+            quoted = m.message.videoMessage.contextInfo.quotedMessage;
+            quotedInfo = m.message.videoMessage.contextInfo;
+        }
+
+        if (quoted && quotedInfo) {
+            let quotedType = getContentType(quoted);
+            m.quoted = {
+                key: {
+                    remoteJid: quotedInfo.remoteJid || m.chat,
+                    fromMe: quotedInfo.fromMe,
+                    id: quotedInfo.stanzaId,
+                    participant: quotedInfo.participant
+                },
+                message: quoted,
+                mtype: quotedType,
+                sender: jidNormalizedUser(quotedInfo.participant || quotedInfo.remoteJid),
+                text: quoted[quotedType]?.text || quoted[quotedType]?.caption || quoted.conversation || '',
+            };
+            m.quoted.fakeObj = proto.WebMessageInfo.fromObject({
+                key: m.quoted.key,
+                message: m.quoted.message,
+                messageTimestamp: quotedInfo.messageTimestamp,
+                participant: quotedInfo.participant
+            });
+
+            // Add download helper to quoted message
+            m.quoted.download = async () => {
+                try {
+                    const type = m.quoted.mtype;
+                    if (!m.quoted.message[type] || !m.quoted.message[type].mediaKey) {
+                        throw new Error("Media key missing. Please ask the sender to resend the image.");
+                    }
+                    const stream = await downloadContentFromMessage(m.quoted.message[type], type.replace('Message', ''));
+                    let buffer = Buffer.from([]);
+                    for await (const chunk of stream) {
+                        buffer = Buffer.concat([buffer, chunk]);
+                    }
+                    return buffer;
+                } catch (e) {
+                    return null;
+                }
+            };
+        } else {
+            m.quoted = undefined;
+        }
+
+        m.mentionedJid =
+            m.message?.extendedTextMessage?.contextInfo?.mentionedJid ||
+            m.message?.stickerMessage?.contextInfo?.mentionedJid ||
+            [];
+
         m.reply = (text, chatId = m.chat, options = {}) =>
             sock.sendMessage(chatId, { text }, { quoted: m, ...options });
     }
@@ -264,9 +448,7 @@ module.exports = startpairing;
 let file = require.resolve(__filename);
 fs.watchFile(file, () => {
     fs.unwatchFile(file);
-    console.log(chalk.redBright(`Update detected in '${__filename}'`));
+    // console.log(chalk.redBright(`Update detected in '${__filename}'`)); // Removed
     delete require.cache[file];
     require(file);
 });
-
-// By яαgємσ∂ѕ
