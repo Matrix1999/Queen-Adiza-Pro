@@ -700,45 +700,72 @@ Matrix.ev.on('messages.update',
    	      }
         });
 
+Matrix.ev.on('messages.update',
+    async(chatUpdate) => {
+    for (const { key, update } of chatUpdate) {
+      	if (update.pollUpdates && key.fromMe) {
+	     const pollCreation = await getMessage(key);
+	   	if (pollCreation) {
+             let pollUpdate = await getAggregateVotesInPollMessage({
+							message: pollCreation?.message,
+							pollUpdates: update.pollUpdates,
+						});
+	          let toCmd = pollUpdate.filter(v => v.voters.length !== 0)[0]?.name
+              console.log(toCmd);
+	          await appenTextMessage(pollCreation, Matrix, toCmd,
+              pollCreation);
+	          await Matrix.sendMessage(key.remoteJid, { delete: key });
+	         	} else return false
+	          return
+   	    	}
+   	      }
+        });
 
-// Merged messages.upsert handler
+
 Matrix.ev.on('messages.upsert', async (chatUpdate) => {
   try {
-    const processedMessages = new Set();
+    const messages = chatUpdate.messages;
 
-    for (const msg of chatUpdate.messages) {
-      if (!msg.message) continue;
+    for (const kay of messages) {
+      if (!kay.message) continue;
 
-      // Save message for persistence
-      const chatId = msg.key.remoteJid;
-      const messageId = msg.key.id;
-      saveStoredMessages(chatId, messageId, msg);
+     kay.message = normalizeMessageContent(kay.message);
 
-      // Normalize message content
-      msg.message = normalizeMessageContent(msg.message);
 
-      // Filter unwanted message IDs
-      if (
-        msg.key.id.startsWith('BAE5') ||
-        (msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (!msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (msg.key.id.length !== 32 && msg.key.id.length !== 20)
-      ) continue;
+if ( // This 'if' block remains as it handles general message ID filtering.
+  kay.key.id.startsWith('BAE5') ||
+  kay.key.id.startsWith('3EBO') && kay.key.id.length === 22 ||
+  (!kay.key.id.startsWith('3EBO') && kay.key.id.length === 22) ||
+  (kay.key.id.length !== 32 && kay.key.id.length !== 20)
+) continue;
 
-      // Avoid processing duplicates
-      if (processedMessages.has(messageId)) continue;
-      processedMessages.add(messageId);
 
-      // Process message with your system handler
-      const m = smsg(Matrix, msg, store);
-      require('./system')(Matrix, m, chatUpdate, store);
+const processedMessages = new Set();
+const messageId = kay.key.id;
+if (processedMessages.has(messageId)) continue;
+processedMessages.add(messageId);
+
+      const m = smsg(Matrix, kay, store);
+
+
+      require('./system')(Matrix, m, chatUpdate, store); // This is for WhatsApp bot's system.js
     }
   } catch (err) {
     console.error('Error handling messages.upsert:', err);
   }
 });
 
-// Interval to clear old session files every 2 hours
+Matrix.ev.on("messages.upsert", async (chatUpdate) => {
+    for (const msg of chatUpdate.messages) {
+        if (!msg.message) return;
+
+        let chatId = msg.key.remoteJid;
+        let messageId = msg.key.id;
+
+        saveStoredMessages(chatId, messageId, msg);
+    }
+});
+
 setInterval(() => {
   try {
     const sessionPath = path.join(__dirname, 'session');
@@ -780,66 +807,55 @@ setInterval(() => {
   }
 }, 7200000);
 
-// Interval to cleanup old messages every hour
 setInterval(cleanupOldMessages, 60 * 60 * 1000);
 
-// Ensure tmp folder exists
 function createTmpFolder() {
-  const folderName = "tmp";
-  const folderPath = path.join(__dirname, folderName);
+const folderName = "tmp";
+const folderPath = path.join(__dirname, folderName);
 
-  if (!fs.existsSync(folderPath)) {
-    fs.mkdirSync(folderPath);
-  }
-}
+if (!fs.existsSync(folderPath)) {
+fs.mkdirSync(folderPath);
+   }
+ }
+
 createTmpFolder();
 
-// Junk files cleanup every 30 seconds
 setInterval(() => {
-  let directoryPath = path.join();
-  fs.readdir(directoryPath, async function (err, files) {
-    if (err) {
-      console.error("Unable to scan directory:", err);
-      return;
-    }
+let directoryPath = path.join();
+fs.readdir(directoryPath, async function (err, files) {
+var filteredArray = await files.filter(item =>
+item.endsWith("gif") ||
+item.endsWith("png") ||
+item.endsWith("mp3") ||
+item.endsWith("mp4") ||
+item.endsWith("opus") ||
+item.endsWith("jpg") ||
+item.endsWith("webp") ||
+item.endsWith("webm") ||
+item.endsWith("zip")
+)
+if(filteredArray.length > 0){
+let teks =`Detected ${filteredArray.length} junk files,\nJunk files have been deleted🚮`
+Matrix.sendMessage(Matrix.user.id, {text : teks })
+setInterval(() => {
+if(filteredArray.length == 0) return console.log("Junk files cleared")
+filteredArray.forEach(function (file) {
+let sampah = fs.existsSync(file)
+if(sampah) fs.unlinkSync(file)
+})
+}, 15_000)
+}
+});
+}, 30_000)
 
-    var filteredArray = files.filter(item =>
-      item.endsWith("gif") ||
-      item.endsWith("png") ||
-      item.endsWith("mp3") ||
-      item.endsWith("mp4") ||
-      item.endsWith("opus") ||
-      item.endsWith("jpg") ||
-      item.endsWith("webp") ||
-      item.endsWith("webm") ||
-      item.endsWith("zip")
-    );
-
-    if (filteredArray.length > 0) {
-      let teks = `Detected ${filteredArray.length} junk files,\nJunk files have been deleted🚮`;
-      Matrix.sendMessage(Matrix.user.id, { text: teks });
-
-      setTimeout(() => {
-        filteredArray.forEach(function (file) {
-          let filePath = path.join(directoryPath, file);
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-        });
-        console.log("Junk files cleared");
-      }, 15_000);
-    }
-  });
-}, 30_000);
-
-// Decode JID helper function
 Matrix.decodeJid = (jid) => {
-  if (!jid) return jid;
-  if (/:\d+@/gi.test(jid)) {
-    let decode = jidDecode(jid) || {};
-    return (decode.user && decode.server && decode.user + "@" + decode.server) || jid;
-  } else return jid;
+if (!jid) return jid;
+if (/:\d+@/gi.test(jid)) {
+let decode = jidDecode(jid) || {};
+return (decode.user && decode.server && decode.user + "@" + decode.server) || jid;
+} else return jid;
 };
+
 
 Matrix.ev.on("contacts.update", (update) => {
 for (let contact of update) {
