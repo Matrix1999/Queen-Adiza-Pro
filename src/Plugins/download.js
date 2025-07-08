@@ -280,7 +280,7 @@ module.exports = [ {
         }
       }
     } catch (error) {
-      console.error('Error fetching images:', error);
+
       reply("An error occurred while fetching images.");
     }
   }
@@ -314,7 +314,7 @@ module.exports = [ {
       await Matrix.sendMessage(m.chat, { react: { text: "✅", key: m.key } });
 
     } catch (err) {
-      console.error("Image generation error:", err);
+
       await Matrix.sendMessage(m.chat, { react: { text: "❌", key: m.key } });
       reply("*An error occurred while generating images. Try again later.*");
     }
@@ -1262,9 +1262,66 @@ await Matrix.sendMessage(m.chat, {
       reply(`Error: ${error.message}`);
     }
   }
-},
-  {
+}, {
   command: ['ytmp4'],
+  operate: async ({ m, text, Matrix, reply }) => {
+    if (!text) {
+      return reply(`*Example*: .ytmp4 https://youtube.com/watch?v=60ItHLz5WEA`);
+    }
+
+    try {
+      // React with loading emoji
+      await Matrix.sendMessage(m.chat, {
+        react: { text: "🔍", key: m.key }
+      });
+
+      // Fetch video details from David Cyriltech API
+      const apiUrl = `https://apis.davidcyriltech.my.id/download/ytmp4?url=${encodeURIComponent(text)}`;
+      const response = await axios.get(apiUrl);
+
+      if (!response.data.success) {
+        await Matrix.sendMessage(m.chat, {
+          react: { text: "❌", key: m.key }
+        });
+        return reply("❌ Error fetching the video!");
+      }
+
+      const { title, download_url, thumbnail } = response.data.result;
+
+      // Send video preview with thumbnail and info
+      await Matrix.sendMessage(m.chat, {
+        image: { url: thumbnail },
+        caption:
+          `🎬 *Video Found* 🎬\n\n` +
+          `🎞️ *Title:* ${title}\n` +
+          `🔗 *YouTube Link:* ${text}\n\n` +
+          `📥 Downloading *video file* for you...`
+      }, { quoted: m });
+
+      // Send the video file
+      await Matrix.sendMessage(m.chat, {
+        video: { url: download_url },
+        mimetype: 'video/mp4',
+        caption: `🎬 *Title:* ${title}`
+      }, { quoted: m });
+
+      // React with success emoji
+      await Matrix.sendMessage(m.chat, {
+        react: { text: "✅", key: m.key }
+      });
+
+    } catch (error) {
+      console.error("ytmp4 command error:", error);
+      await Matrix.sendMessage(m.chat, {
+        react: { text: "❌", key: m.key }
+      });
+      reply("❌ An error occurred while processing your request.");
+    }
+  }
+}, 
+
+  {
+  command: ['ytube'],
   operate: async ({ Matrix, m, reply, text, fetchVideoDownloadUrl }) => {
     if (!text) return reply('*Please provide a valid YouTube link!*');
 

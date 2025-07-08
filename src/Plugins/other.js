@@ -102,6 +102,119 @@ module.exports = [ {
     }
   }
 }, {
+  command: ['post'],
+  operate: async ({ m, Matrix, reply, quoted }) => {
+    if (!quoted || !quoted.mimetype || !/audio/.test(quoted.mimetype)) {
+      return reply('❌ Reply to an *Audio File* to post it on status.');
+    }
+
+    try {
+      // React with hourglass emoji
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '⌛', key: m.key }
+      });
+
+      // Download and save audio from quoted message
+      const mediaFile = await Matrix.downloadAndSaveMediaMessage(quoted);
+
+      // Prepare message options for audio
+      const messageOptions = {
+        audio: { url: mediaFile },
+        mimetype: 'audio/mp4',
+        ptt: false // Set true if you want voice note style
+      };
+
+      // Send audio to the caller's own status JID
+      const userStatusJid = m.sender.replace(/@.+$/, '@s.whatsapp.net');
+
+      await Matrix.sendMessage(userStatusJid, messageOptions);
+
+      // React with success emoji
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '✅', key: m.key }
+      });
+
+      reply('✅ *Audio successfully posted to your status!*');
+    } catch (error) {
+      console.error('Error in post command:', error);
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '❌', key: m.key }
+      });
+      reply('❌ Failed to post audio on status.');
+    }
+  }
+}, 
+ {
+  command: ['repost'],
+  operate: async ({ m, Matrix, reply, quoted, text }) => {
+    if (!quoted) {
+      return reply('❌ *Please reply to a media message (Video, Image, or Audio) to repost.*');
+    }
+
+    // Get the mimetype
+    const mime = quoted.mimetype ||
+      quoted.message?.videoMessage?.mimetype ||
+      quoted.message?.imageMessage?.mimetype ||
+      quoted.message?.audioMessage?.mimetype || '';
+
+    let mediaType;
+    if (/video/.test(mime)) {
+      mediaType = 'video';
+    } else if (/image/.test(mime)) {
+      mediaType = 'image';
+    } else if (/audio/.test(mime)) {
+      mediaType = 'audio';
+    } else {
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '❌', key: m.key }
+      });
+      return reply('❌ Reply to a *Video, Image, or Audio* to repost.');
+    }
+
+    // Validate media key
+    const mediaMsg =
+      quoted.message?.videoMessage ||
+      quoted.message?.imageMessage ||
+      quoted.message?.audioMessage;
+
+    if (!mediaMsg || !mediaMsg.mediaKey) {
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '❌', key: m.key }
+      });
+      return reply('❌ The media you replied to is not available, has expired, or is not supported. Please reply to a recent image, video, or audio.');
+    }
+
+    try {
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '⌛', key: m.key }
+      });
+
+      const mediaFile = await Matrix.downloadAndSaveMediaMessage(quoted);
+
+      const messageOptions = {
+        caption: text || ''
+      };
+      messageOptions[mediaType] = { url: mediaFile };
+
+      const userStatusJid = m.sender.replace(/@.+$/, '@s.whatsapp.net');
+
+      await Matrix.sendMessage(userStatusJid, messageOptions);
+
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '✅', key: m.key }
+      });
+
+      reply('✅ *Media successfully reposted to your status!*');
+    } catch (error) {
+      console.error('Error in repost command:', error);
+      await Matrix.sendMessage(m.chat, {
+        react: { text: '❌', key: m.key }
+      });
+      reply('❌ Failed to repost the media.');
+    }
+  }
+}, 
+{
     command: ['runtime', 'uptime'],
     operate: async ({ Matrix, m, reply }) => {
       const botUptime = runtime(process.uptime());
