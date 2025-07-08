@@ -7,14 +7,14 @@ const { Boom } = require("@hapi/boom");
 const axios = require("axios"); 
 const os = require('os'); 
 const moment = require("moment-timezone"); 
-const { runtime, smsg: smsgMyfunc } = require("./lib/myfunc"); // <<< MODIFIED: Import smsg from myfunc.js as smsgMyfunc
+const { runtime, smsg: smsgMyfunc } = require("./lib/myfunc");
 const versions = require("./package.json").version;
 
 // --- GLOBAL SOCKET MAP ---
-global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
+global.activeSockets = global.activeSockets || {};
+global.manuallyDisconnected = global.manuallyDisconnected || new Set(); 
 
-// --- ADDED: extendWASocket import ---
-const extendWASocket = require('./lib/matrixUtils'); // Import the utility
+const extendWASocket = require('./lib/matrixUtils');
 
 // --- STORE DEFINITION ---
 const store = {
@@ -44,7 +44,6 @@ function saveStoredMessages(chatId, messageId, messageData) {
         try {
             storedMessages = JSON.parse(fs.readFileSync(storeFile));
         } catch (err) {
-            // console.error("⚠️ Error reading store.json in rentbot.js:", err); // Removed
             storedMessages = {};
         }
     }
@@ -53,12 +52,10 @@ function saveStoredMessages(chatId, messageId, messageData) {
         storedMessages[chatId][messageId] = messageData;
         try {
             fs.writeFileSync(storeFile, JSON.stringify(storedMessages, null, 2));
-        } catch (err) {
-            // console.error("❌ Error writing to store.json in rentbot.js:", err); // Removed
-        }
-        return true; // Return true if message was newly stored
+        } catch (err) {}
+        return true;
     }
-    return false; // Return false if message already existed or couldn't be stored
+    return false;
 }
 
 let pairingCodeErrorShown = false;
@@ -76,61 +73,41 @@ function deleteFolderRecursive(folderPath) {
     }
 }
 
-// --- PREMIUM CHECK FUNCTION ---
 function isPremiumUser(MatrixNumber) {
     const premiumUsers = (global.db && global.db.data && global.db.data.premium) ? global.db.data.premium : [];
     return premiumUsers.some(p => p.jid === MatrixNumber);
 }
 
 async function startpairing(MatrixNumber) {
-    // --- PREMIUM CHECK: Block non-premium users ---
     if (!isPremiumUser(MatrixNumber)) {
-        // console.log(chalk.red(`[RENTPOT] Not starting session for ${MatrixNumber} (not premium).`)); // Removed
         return;
     }
-
+    if (global.manuallyDisconnected.has(MatrixNumber)) {
+        console.log(chalk.yellow(`[RENTPOT] Not starting session for ${MatrixNumber} (manually disconnected by owner).`));
+        return;
+    }
     try {
-        // Ensure base pairing directory exists to prevent ENOENT
-        const basePairingDir = path.join('./lib2', 'pairing');
+        const basePairingDir = path.join('./lib', 'pairing');
         if (!fs.existsSync(basePairingDir)) {
             fs.mkdirSync(basePairingDir, { recursive: true });
-            // console.log(chalk.green(`[RENTPOT] Created missing base pairing directory: ${basePairingDir}`)); // Removed
         }
-
         const sessionPath = path.join(basePairingDir, MatrixNumber);
-
         if (!fs.existsSync(sessionPath)) {
             fs.mkdirSync(sessionPath, { recursive: true });
-            // console.log(chalk.green(`[RENTPOT] Created missing session directory for ${MatrixNumber}: ${sessionPath}`)); // Removed
         }
-
         const credsFilePath = path.join(sessionPath, 'creds.json');
         const pairingFilePath = path.join(sessionPath, 'pairing.json');
 
-        if (!fs.existsSync(credsFilePath)) {
-            // console.warn(chalk.yellow(`[${MatrixNumber}] No creds.json found, starting fresh.`)); // Removed
-        }
-
-        // Improved log: distinguish between first time and reuse
         if (fs.existsSync(pairingFilePath)) {
             const pairingData = JSON.parse(fs.readFileSync(pairingFilePath, 'utf-8'));
-            if (!fs.existsSync(credsFilePath)) {
-                // No creds.json means this is the first time pairing
-                // console.log(chalk.green(`[RENTPOT] Using newly generated pairing code for ${MatrixNumber}: ${pairingData.code}`)); // Removed
-            } else {
-                // creds.json exists, so this is a reuse
-                // console.log(chalk.blue(`[RENTPOT] Reusing existing pairing code for ${MatrixNumber}: ${pairingData.code}`)); // Removed
-            }
         }
 
         const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
         if (!state?.creds) {
-            // console.warn(chalk.red(`[${MatrixNumber}] Invalid session state. Resetting.`)); // Removed
             deleteFolderRecursive(sessionPath);
             if (!fs.existsSync(sessionPath)) {
                 fs.mkdirSync(sessionPath, { recursive: true });
-                // console.log(chalk.green(`[RENTPOT] Re-created session directory after reset for ${MatrixNumber}: ${sessionPath}`)); // Removed
             }
             return setTimeout(() => startpairing(MatrixNumber), 5000);
         }
@@ -148,25 +125,23 @@ async function startpairing(MatrixNumber) {
                 return key.id ? (await Matrix.fetchMessagesFromWA(key.remoteJid, [key])).messages[0]?.message || '' : '';
             },
             shouldSyncHistoryMessage: msg => {
-                // console.log(`\x1b[32mLoading Chat [${msg.progress}%]\x1b[39m`); // Removed
                 return !!msg.syncType;
             }
         });
 
-        // --- TRACK THE SOCKET GLOBALLY ---
-        global.activeSockets[MatrixNumber] = Matrix;
+        const keepAliveInterval = setInterval(() => {
+            if (Matrix?.user) {
+                Matrix.sendPresenceUpdate('available').catch(err => {});
+            }
+        }, 1000 * 60 * 30);
+        
+        global.activeSockets[MatrixNumber] = {
+            sock: Matrix,
+            keepAliveIntervalId: keepAliveInterval
+        };
 
         extendWASocket(Matrix);
 
-        const keepAliveInterval = setInterval(() => {
-            if (Matrix?.user) {
-                Matrix.sendPresenceUpdate('available').catch(err => {
-                    // console.error("Keep-alive failed:", err.message); // Removed
-                });
-            }
-        }, 1000 * 60 * 30);
-
-        // --- PAIRING CODE GENERATION LOGIC ---
         if (!state.creds.registered && MatrixNumber && !pairingRequested[MatrixNumber]) {
             pairingRequested[MatrixNumber] = true;
             const phoneNumber = MatrixNumber.replace(/[^0-9]/g, '');
@@ -176,10 +151,8 @@ async function startpairing(MatrixNumber) {
                     let code = await Matrix.requestPairingCode(phoneNumber);
                     code = code?.match(/.{1,4}/g)?.join("-") || code;
                     fs.writeFileSync(pairingFilePath, JSON.stringify({ code }, null, 2));
-                    // console.log(chalk.green(`[RENTPOT] Pairing code written to: ${pairingFilePath}`)); // Removed
                 } catch (err) {
                     if (!pairingCodeErrorShown) {
-                        // console.error("Error requesting pairing code:", err.stack || err.message); // Removed
                         pairingCodeErrorShown = true;
                     }
                 }
@@ -190,17 +163,12 @@ async function startpairing(MatrixNumber) {
             try {
                 const msg = chatUpdate.messages[0];
                 if (!msg.message) return;
-
                 if (msg.key.remoteJid !== 'status@broadcast' && msg.message) {
                      saveStoredMessages(msg.key.remoteJid, msg.key.id, msg);
                 }
-
-                // Call smsg from myfunc.js for system.js processing
-                const m = smsgMyfunc(Matrix, msg, store); // <<< MODIFIED: Using smsgMyfunc and passing 'store'
+                const m = smsgMyfunc(Matrix, msg, store);
                 require("./system")(Matrix, m, chatUpdate, store);
-            } catch (err) {
-                // console.error("Error handling message:", err.stack || err.message); // Removed
-            }
+            } catch (err) {}
         });
 
         const badSessionRetries = {};
@@ -211,18 +179,24 @@ async function startpairing(MatrixNumber) {
 
             try {
                 if (connection === "close") {
-                    clearInterval(keepAliveInterval);
+                    // ===> ADDED FOR DEBUGGING DISCONNECT REASONS <===
+                    console.log("Disconnect error object:", lastDisconnect?.error);
+
+                    if (global.activeSockets[MatrixNumber] && global.activeSockets[MatrixNumber].keepAliveIntervalId) {
+                        clearInterval(global.activeSockets[MatrixNumber].keepAliveIntervalId);
+                    }
+                    
                     connectionNotified[MatrixNumber] = false;
 
-                    // --- REMOVE SOCKET FROM GLOBAL ON DISCONNECT ---
                     if (global.activeSockets[MatrixNumber]) {
                         delete global.activeSockets[MatrixNumber];
-                        // console.log(chalk.yellow(`[RENTPOT] Removed socket for ${MatrixNumber} from global.activeSockets.`)); // Removed
                     }
 
-                    // --- PREMIUM CHECK: Prevent reconnect if not premium ---
                     if (!isPremiumUser(MatrixNumber)) {
-                        // console.log(chalk.red(`[RENTPOT] Not reconnecting socket for ${MatrixNumber} (not premium).`)); // Removed
+                        return;
+                    }
+                    if (global.manuallyDisconnected.has(MatrixNumber)) {
+                        console.log(chalk.yellow(`[RENTPOT] Not attempting reconnect for ${MatrixNumber} (manually disconnected by owner).`));
                         return;
                     }
 
@@ -230,15 +204,12 @@ async function startpairing(MatrixNumber) {
                         case DisconnectReason.badSession:
                             badSessionRetries[MatrixNumber] = (badSessionRetries[MatrixNumber] || 0) + 1;
                             if (badSessionRetries[MatrixNumber] <= 6) {
-
                                 pairingRequested[MatrixNumber] = false;
                                 return setTimeout(() => startpairing(MatrixNumber), 3000);
                             } else {
-                                // console.log(chalk.red(`[${MatrixNumber}] Bad session retry limit reached. Deleting session and starting fresh.`)); // Removed
                                 deleteFolderRecursive(sessionPath);
                                 if (!fs.existsSync(sessionPath)) {
                                     fs.mkdirSync(sessionPath, { recursive: true });
-
                                 }
                                 badSessionRetries[MatrixNumber] = 0;
                                 pairingRequested[MatrixNumber] = false;
@@ -251,46 +222,54 @@ async function startpairing(MatrixNumber) {
                         case DisconnectReason.timedOut:
                             reconnectAttempts[MatrixNumber] = (reconnectAttempts[MatrixNumber] || 0) + 1;
                             if (reconnectAttempts[MatrixNumber] <= 5) {
-                                // console.log(`[${MatrixNumber}] attempting reconnect (${reconnectAttempts[MatrixNumber]}/5)...`); // Removed
                                 return setTimeout(() => startpairing(MatrixNumber), 2000);
-                            } else {
-                                // console.log(`[${MatrixNumber}] max reconnect attempts reached.`); // Removed
                             }
                             break;
                         case DisconnectReason.loggedOut:
-                            // --- USER LOGGED OUT: DELETE SESSION FOLDER, KEEP PREMIUM ---
                             deleteFolderRecursive(sessionPath);
-                            // console.log(chalk.bgRed(`${MatrixNumber} logged out. Session folder deleted.`)); // Removed
                             pairingRequested[MatrixNumber] = false;
-                            // DO NOT remove premium from database!
+                            global.manuallyDisconnected.delete(MatrixNumber); 
+                            if (global.db && global.db.data && Array.isArray(global.db.data.manualDisconnects)) {
+                                global.db.data.manualDisconnects = global.db.data.manualDisconnects.filter(jid => jid !== MatrixNumber);
+                                await global.db.write();
+                                console.log(chalk.green(`[RENTPOT] ${MatrixNumber} logged out, removed from manual disconnect list (persistent).`));
+                            } else {
+                                console.log(chalk.green(`[RENTPOT] ${MatrixNumber} logged out, removed from manual disconnect list (runtime only).`));
+                            }
                             break;
                         default:
                             connectionNotified[MatrixNumber] = false;
+                            reconnectAttempts[MatrixNumber] = (reconnectAttempts[MatrixNumber] || 0) + 1;
+                            if (reconnectAttempts[MatrixNumber] <= 5) {
+                                console.log(chalk.yellow(`[RENTPOT] Unknown disconnection reason for ${MatrixNumber}, attempting reconnect (${reconnectAttempts[MatrixNumber]}/5)...`));
+                                return setTimeout(() => startpairing(MatrixNumber), 2000);
+                            } else {
+                                console.log(chalk.red(`[RENTPOT] Max unknown reconnect attempts reached for ${MatrixNumber}.`));
+                            }
                     }
                 } else if (connection === "open") {
-                    // console.log(chalk.bgGreen(`Rent bot is active on ${MatrixNumber}`)); // Removed
                     reconnectAttempts[MatrixNumber] = 0;
                     badSessionRetries[MatrixNumber] = 0;
-
-                    // --- START ADDED CODE FOR RENT BOT STARTUP MESSAGE ---
-
-                    // Get specific settings for THIS rent bot instance from the database
-                    const rentBotInstanceJid = Matrix.user.id; // This is the JID of the rent bot itself
-                    // Ensure global.db is accessible (it should be if index.js runs first and sets it)
+                    if (global.manuallyDisconnected.has(MatrixNumber)) {
+                        global.manuallyDisconnected.delete(MatrixNumber);
+                        if (global.db && global.db.data && Array.isArray(global.db.data.manualDisconnects)) {
+                            global.db.data.manualDisconnects = global.db.data.manualDisconnects.filter(jid => jid !== MatrixNumber);
+                            await global.db.write();
+                            console.log(chalk.green(`[RENTPOT] ${MatrixNumber} reconnected, removed from manual disconnect list (persistent).`));
+                        } else {
+                            console.log(chalk.green(`[RENTPOT] ${MatrixNumber} reconnected, removed from manual disconnect list (runtime only).`));
+                        }
+                    }
+                    const rentBotInstanceJid = Matrix.user.id;
                     const rentBotSettings = global.db.data.users[rentBotInstanceJid] || {};
-
                     const instancePrefix = rentBotSettings.prefix ?? global.db.data.settings.prefix ?? '.';
                     const instanceMode = rentBotSettings.mode ?? global.db.data.settings.mode ?? 'public';
-
                     const modeStatus =
                         instanceMode === 'public' ? "Public" :
                         instanceMode === 'private' ? "Private" :
                         instanceMode === 'group' ? "Group Only" :
                         instanceMode === 'pm' ? "PM Only" : "Unknown";
 
-                    // The 'const updates = await checkForUpdates();' line is removed here.
-
-                    // Send the startup message to the rent bot's own JID (Matrix.user.id)
                     await Matrix.sendMessage(Matrix.user.id, {
                         text:
                             "╭༺◈👸🌹𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔🌹👸\n" +
@@ -300,24 +279,17 @@ async function startpairing(MatrixNumber) {
                             "│🚀 » *Mode*: " + modeStatus + "\n" +    
                             `│🤖 » *Version*: [ ${versions} ]\n` +    
                             "╰───━━━༺◈༻━━━───╯\n\n" + 
-
                             "╭༺◈👑 *𝗕𝗢𝗧 𝗦𝗧𝗔𝗧𝗨𝗦* 👑◈༻╮\n" + 
                             `│🕒 *Uptime*: ${runtime(process.uptime())}\n` +
                             "╰───━━━༺◈༻━━━───╯\n\n" +
-
                             "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" + 
                             `│🗓️ ${moment.tz('Africa/Accra').format('dddd, DD MMMM')}\n` +    
-                            `│🕒 ${moment.tz('Africa/Accra').format('HH:mm:ss z')}\n` +                             `╰───━━━༺◈༻━━━───╯\n`
-                            
+                            `│🕒 ${moment.tz('Africa/Accra').format('HH:mm:ss z')}\n` + `╰───━━━༺◈༻━━━───╯\n`
                     }, {
                         ephemeralExpiration: 1800 
                     });
-// --- END ADDED CODE ---
-
-
                 }
             } catch (err) {
-                // console.error("Connection update error:", err.stack || err.message); // Removed
                 connectionNotified[MatrixNumber] = false;
                 setTimeout(() => startpairing(MatrixNumber), 5000);
             }
@@ -326,36 +298,27 @@ async function startpairing(MatrixNumber) {
         Matrix.ev.on("creds.update", async creds => {
             try {
                 await saveCreds();
-            } catch (err) {
-                // console.error("Failed to save credentials:", err.stack || err.message); // Removed
-            }
+            } catch (err) {}
         });
     } catch (err) {
-        // console.error("Fatal error in startpairing:", err.stack || err.message); // Removed
         setTimeout(() => startpairing(MatrixNumber), 5000);
     }
 }
 
-// --- ENHANCED & ROBUST SMSG FUNCTION (KEPT AS IS) ---
-function smsg(sock, m) { // This function remains named 'smsg' for internal rentbot.js dependencies
+function smsg(sock, m) {
     if (!m) return m;
-
     m.id = m.key.id;
     m.isBaileys = m.id.startsWith('BAE5') && m.id.length === 16;
     m.chat = m.key.remoteJid;
     m.fromMe = m.key.fromMe;
     m.isGroup = m.chat.endsWith('@g.us');
     m.sender = jidNormalizedUser(m.fromMe && sock.user.id || m.participant || m.key.participant || m.chat || '');
-
     if (m.message) {
         m.mtype = getContentType(m.message);
         m.msg = (m.mtype === 'viewOnceMessage')
             ? m.message[m.mtype].message[getContentType(m.message[m.mtype].message)]
             : m.message[m.mtype];
-
         m.text = m.message?.conversation || m.msg?.caption || m.msg?.text || '';
-
-        // Add download helper to main message
         m.download = async () => {
             try {
                 const type = m.mtype;
@@ -372,8 +335,6 @@ function smsg(sock, m) { // This function remains named 'smsg' for internal rent
                 return null;
             }
         };
-
-        // --- Robust Quoted Message Handling for ALL Types ---
         let quoted = null, quotedInfo = null;
         if (m.message?.stickerMessage?.contextInfo?.quotedMessage) {
             quoted = m.message.stickerMessage.contextInfo.quotedMessage;
@@ -388,7 +349,6 @@ function smsg(sock, m) { // This function remains named 'smsg' for internal rent
             quoted = m.message.videoMessage.contextInfo.quotedMessage;
             quotedInfo = m.message.videoMessage.contextInfo;
         }
-
         if (quoted && quotedInfo) {
             let quotedType = getContentType(quoted);
             m.quoted = {
@@ -409,8 +369,6 @@ function smsg(sock, m) { // This function remains named 'smsg' for internal rent
                 messageTimestamp: quotedInfo.messageTimestamp,
                 participant: quotedInfo.participant
             });
-
-            // Add download helper to quoted message
             m.quoted.download = async () => {
                 try {
                     const type = m.quoted.mtype;
@@ -430,16 +388,13 @@ function smsg(sock, m) { // This function remains named 'smsg' for internal rent
         } else {
             m.quoted = undefined;
         }
-
         m.mentionedJid =
             m.message?.extendedTextMessage?.contextInfo?.mentionedJid ||
             m.message?.stickerMessage?.contextInfo?.mentionedJid ||
             [];
-
         m.reply = (text, chatId = m.chat, options = {}) =>
             sock.sendMessage(chatId, { text }, { quoted: m, ...options });
     }
-
     return m;
 }
 
@@ -448,7 +403,6 @@ module.exports = startpairing;
 let file = require.resolve(__filename);
 fs.watchFile(file, () => {
     fs.unwatchFile(file);
-    // console.log(chalk.redBright(`Update detected in '${__filename}'`)); // Removed
     delete require.cache[file];
     require(file);
 });

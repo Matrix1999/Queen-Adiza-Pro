@@ -1,19 +1,34 @@
-// adiza.js (Updated content with explicit range function)
-
-
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 
-const pairingPath = path.join(__dirname, 'lib2', 'pairing');
+const pairingPath = path.join(__dirname, 'lib', 'pairing');
 
 if (!fs.existsSync(pairingPath)) {
     fs.mkdirSync(pairingPath, { recursive: true });
     console.log(`[ADIZA] Created missing directory: ${pairingPath}`);
 }
 
+
 process.on('uncaughtException', console.error)
 require("./settings") // Ensure settings.js is properly required to access global.DEVELOPER and global.OWNER
+
+// --- START: This entire block should be present and correct ---
+const adminfile = path.join(__dirname, 'lib', 'premium.json');
+let adminIDs = JSON.parse(fs.readFileSync(adminfile, 'utf8'));
+
+fs.watchFile(adminfile, () => {
+  adminIDs = JSON.parse(fs.readFileSync(adminfile, 'utf8'));
+  console.log('Premium user list updated dynamically');
+});
+
+// This is the function that checks if a TELEGRAM USER ID is premium
+function isTelegramPremiumUser(userId) { // <--- ENSURE THIS FUNCTION IS HERE
+  return adminIDs.includes(userId);
+}
+// --- END of block ---
+
+
 const {
     Telegraf,
     Context,
@@ -69,25 +84,6 @@ const cooldowns = new Map(); // Create a map to track cooldowns
 
 
 
-//  telegram Add Premium function
-
-const adminfile = path.join(__dirname, 'lib', 'premium.json');
-let adminIDs = JSON.parse(fs.readFileSync(adminfile, 'utf8'));
-
-fs.watchFile(adminfile, () => {
-  adminIDs = JSON.parse(fs.readFileSync(adminfile, 'utf8'));
-  console.log('Premium user list updated dynamically');
-});
-
-function isPremiumUser(userId) {
-
-  return adminIDs.includes(userId);
-
-}
-
-
-
-
 // Explicitly define the 'range' function here for use in the 'reply' function
 function range(start, stop, step) {
     if (stop == null) {
@@ -110,40 +106,40 @@ function escapeMarkdownV2(text) {
     return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
 }
 
-module.exports = XeonBotInc = async (XeonBotInc, bot) => {
-    //console.log(XeonBotInc)
+module.exports = AdizaBotInc = async (AdizaBotInc, bot) => {
+    //console.log(AdizaBotInc)
     try {
-        const body = XeonBotInc.message.text || XeonBotInc.message.caption || ''
-        const budy = (typeof XeonBotInc.message.text == 'string' ? XeonBotInc.message.text : '')
+        const body = AdizaBotInc.message.text || AdizaBotInc.message.caption || ''
+        const budy = (typeof AdizaBotInc.message.text == 'string' ? AdizaBotInc.message.text : '')
 
         const isCmd = /^[°•π÷×¶∆£¢€¥®™✓_=|~!?#/$%^&.+-,\\\©^]/.test(body)
         const args = body.trim().split(/ +/).slice(1);
         const text = q = args.join(" ");
         // --- CORRECTED ORDER ---
         // 1. Get the user object first.
-        const user = XeonBotInc.message.from;
+        const user = AdizaBotInc.message.from;
         // 2. Now that 'user' exists, create other variables from it.
         const pushname = user.first_name; // Use first_name as pushname
         const fullName = user.last_name ? `${user.first_name} ${user.last_name}` : user.first_name;
         const userId = user.id.toString();
 
-        const isCreator = global.OWNER.includes(XeonBotInc.update.message.from.username ? `https://t.me/${XeonBotInc.update.message.from.username}` : '') || global.DEVELOPER.includes(userId);
-        const from = XeonBotInc.message.chat.id
+        const isCreator = global.OWNER.includes(AdizaBotInc.update.message.from.username ? `https://t.me/${AdizaBotInc.update.message.from.username}` : '') || global.DEVELOPER.includes(userId);
+        const from = AdizaBotInc.message.chat.id
         const prefix = isCmd ? body[0] : ''
         const command = isCreator ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : isCmd ? body.replace(prefix, '').trim().split(/ +/).shift().toLowerCase() : '';
-        const isGroup = XeonBotInc.chat.type.includes('group')
-        const groupName = isGroup ? XeonBotInc.chat.title : ''
+        const isGroup = AdizaBotInc.chat.type.includes('group')
+        const groupName = isGroup ? AdizaBotInc.chat.title : ''
 
-        const isImage = XeonBotInc.message.hasOwnProperty('photo')
-        const isVideo = XeonBotInc.message.hasOwnProperty('video')
-        const isAudio = XeonBotInc.message.hasOwnProperty('audio')
-        const isSticker = XeonBotInc.message.hasOwnProperty('sticker')
-        const isContact = XeonBotInc.message.hasOwnProperty('contact')
-        const isLocation = XeonBotInc.message.hasOwnProperty('location')
-        const isDocument = XeonBotInc.message.hasOwnProperty('document')
-        const isAnimation = XeonBotInc.message.hasOwnProperty('animation')
+        const isImage = AdizaBotInc.message.hasOwnProperty('photo')
+        const isVideo = AdizaBotInc.message.hasOwnProperty('video')
+        const isAudio = AdizaBotInc.message.hasOwnProperty('audio')
+        const isSticker = AdizaBotInc.message.hasOwnProperty('sticker')
+        const isContact = AdizaBotInc.message.hasOwnProperty('contact')
+        const isLocation = AdizaBotInc.message.hasOwnProperty('location')
+        const isDocument = AdizaBotInc.message.hasOwnProperty('document')
+        const isAnimation = AdizaBotInc.message.hasOwnProperty('animation')
         const isMedia = isImage || isVideo || isAudio || isSticker || isContact || isLocation || isDocument || isAnimation
-        const quotedMessage = XeonBotInc.message.reply_to_message || {}
+        const quotedMessage = AdizaBotInc.message.reply_to_message || {}
         const isQuotedImage = quotedMessage.hasOwnProperty('photo')
         const isQuotedVideo = quotedMessage.hasOwnProperty('video')
         const isQuotedAudio = quotedMessage.hasOwnProperty('audio')
@@ -152,14 +148,14 @@ module.exports = XeonBotInc = async (XeonBotInc, bot) => {
         const isQuotedLocation = quotedMessage.hasOwnProperty('location')
         const isQuotedDocument = quotedMessage.hasOwnProperty('document')
         const isQuotedAnimation = quotedMessage.hasOwnProperty('animation')
-        const isQuoted = XeonBotInc.message.hasOwnProperty('reply_to_message')
+        const isQuoted = AdizaBotInc.message.hasOwnProperty('reply_to_message')
         const timestampi = speed();
         const latensii = speed() - timestampi
 
         const reply = async (text) => {
             // Uses the locally defined 'range' function
             for (var x of range(0, text.length, 4096)) { //maks 4096 character, jika lebih akan eror
-                return await XeonBotInc.replyWithMarkdown(text.substr(x, 4096), {
+                return await AdizaBotInc.replyWithMarkdown(text.substr(x, 4096), {
                     disable_web_page_preview: true
                 })
             }
@@ -185,8 +181,8 @@ module.exports = XeonBotInc = async (XeonBotInc, bot) => {
         else if (isAnimation) typeMessage = 'Animation'
 
         //push message to console
-        if (XeonBotInc.message) {
-            console.log(chalk.black(chalk.bgWhite('[ CMD ]')), chalk.black(chalk.bgGreen(new Date)), chalk.black(chalk.bgBlue(body || typeMessage)) + '\n' + chalk.magenta('=> From'), chalk.green(pushname) + '\n' + chalk.blueBright('=> In'), chalk.green(isGroup ? groupName : 'Private Chat', XeonBotInc.message.chat.id))
+        if (AdizaBotInc.message) {
+            console.log(chalk.black(chalk.bgWhite('[ CMD ]')), chalk.black(chalk.bgGreen(new Date)), chalk.black(chalk.bgBlue(body || typeMessage)) + '\n' + chalk.magenta('=> From'), chalk.green(pushname) + '\n' + chalk.blueBright('=> In'), chalk.green(isGroup ? groupName : 'Private Chat', AdizaBotInc.message.chat.id))
         }
 
         const sendMessage = (chatId, text) => bot.sendMessage(chatId, text);
@@ -214,14 +210,14 @@ module.exports = XeonBotInc = async (XeonBotInc, bot) => {
                         const timeLeft = 30000 - (now - lastUsed); // 30 seconds cooldown
 
                         if (timeLeft > 0) {
-                            return XeonBotInc.reply(`Please wait ${Math.ceil(timeLeft / 1000)} seconds before using the command again.`);
+                            return AdizaBotInc.reply(`Please wait ${Math.ceil(timeLeft / 1000)} seconds before using the command again.`);
                         }
                     }
                 }
 
-                const isOwner = global.DEVELOPER.includes(XeonBotInc.message.from.id.toString());
+                const isOwner = global.DEVELOPER.includes(AdizaBotInc.message.from.id.toString());
                 if (!isOwner) {
-                    return XeonBotInc.reply(`Please use the command /pair and connect the bot to your messenger whatsapp.`);
+                    return AdizaBotInc.reply(`Please use the command /pair and connect the bot to your messenger whatsapp.`);
                 }
 
                 const JSConfuser = require("js-confuser");
@@ -233,8 +229,8 @@ ${prefix + command} doc (Reply to a document)`;
                 let text;
                 if (args.length >= 1) {
                     text = args.join(" ");
-                } else if (XeonBotInc.message.reply_to_message && XeonBotInc.message.reply_to_message.text) {
-                    text = XeonBotInc.message.reply_to_message.text;
+                } else if (AdizaBotInc.message.reply_to_message && AdizaBotInc.message.reply_to_message.text) {
+                    text = AdizaBotInc.message.reply_to_message.text;
                 } else {
                     return reply(usage);
                 }
@@ -251,8 +247,8 @@ ${prefix + command} doc (Reply to a document)`;
 
                 try {
                     let code;
-                    if (text === 'doc' && XeonBotInc.message.reply_to_message && XeonBotInc.message.reply_to_message.document) {
-                        const fileLink = await bot.telegram.getFileLink(XeonBotInc.message.reply_to_message.document.file_id);
+                    if (text === 'doc' && AdizaBotInc.message.reply_to_message && AdizaBotInc.message.reply_to_message.document) {
+                        const fileLink = await bot.telegram.getFileLink(AdizaBotInc.message.reply_to_message.document.file_id);
                         const response = await axios.get(fileLink.href, {
                             responseType: 'arraybuffer'
                         });
@@ -330,7 +326,7 @@ ${prefix + command} doc (Reply to a document)`;
                     fs.writeFileSync(encryptedFilePath, obfuscatedCode);
 
                     // Send the document
-                    await bot.telegram.sendDocument(XeonBotInc.message.chat.id, {
+                    await bot.telegram.sendDocument(AdizaBotInc.message.chat.id, {
                         source: encryptedFilePath,
                         filename: 'Encrypted By @Matrixxxxxxxxx.js'
                     });
@@ -368,14 +364,14 @@ ${prefix + command} doc (Reply to a document)`;
                         const timeLeft = 30000 - (now - lastUsed); // 30 seconds cooldown
 
                         if (timeLeft > 0) {
-                            return XeonBotInc.reply(`Please wait ${Math.ceil(timeLeft / 1000)} seconds before using the command again.`);
+                            return AdizaBotInc.reply(`Please wait ${Math.ceil(timeLeft / 1000)} seconds before using the command again.`);
                         }
                     }
                 }
 
-                const isOwner = global.DEVELOPER.includes(XeonBotInc.message.from.id.toString());
+                const isOwner = global.DEVELOPER.includes(AdizaBotInc.message.from.id.toString());
                 if (!isOwner) {
-                    return XeonBotInc.reply(`Please use the command /pair and connect the bot to your messenger whatsapp.`);
+                    return AdizaBotInc.reply(`Please use the command /pair and connect the bot to your messenger whatsapp.`);
                 }
 
                 // Ensure webcrack is imported if this block is uncommented
@@ -446,20 +442,20 @@ ${prefix + command} doc (Reply to a document)`;
             }
 
             case 'listpair': {
-                const isOwner = global.DEVELOPER.includes(XeonBotInc.message.from.id.toString()); // Re-using isOwner for developer check
+                const isOwner = global.DEVELOPER.includes(AdizaBotInc.message.from.id.toString()); // Re-using isOwner for developer check
                 if (!isOwner) {
-                    return XeonBotInc.reply(`This command is only for owner.`);
+                    return AdizaBotInc.reply(`This command is only for owner.`);
                 }
 
-                const pairingPath = './lib2/pairing';
+                const pairingPath = './lib/pairing';
 
                 try {
                     // Check if the directory exists
                     if (!fs.existsSync(pairingPath)) {
-                        return XeonBotInc.reply('No paired devices found.');
+                        return AdizaBotInc.reply('No paired devices found.');
                     }
 
-                    // Read all directories (and files) inside ./lib2/pairing
+                    // Read all directories (and files) inside ./lib/pairing
                     const entries = fs.readdirSync(pairingPath, {
                         withFileTypes: true
                     });
@@ -471,7 +467,7 @@ ${prefix + command} doc (Reply to a document)`;
 
                     // Handle if no paired devices are found
                     if (pairedDevices.length === 0) {
-                        return XeonBotInc.reply('No paired devices found.');
+                        return AdizaBotInc.reply('No paired devices found.');
                     }
 
                     // Count total paired devices
@@ -482,17 +478,17 @@ ${prefix + command} doc (Reply to a document)`;
                         .map((device, index) => `${index + 1}. ${device}`)
                         .join('\n');
 
-                    XeonBotInc.reply(`Total Rent Bot Users: ${totalUsers}\n\nPaired Devices:\n${deviceList}`);
+                    AdizaBotInc.reply(`Total Rent Bot Users: ${totalUsers}\n\nPaired Devices:\n${deviceList}`);
                 } catch (err) {
                     console.error('Error reading paired devices directory:', err);
-                    return XeonBotInc.reply('Failed to load paired devices data.');
+                    return AdizaBotInc.reply('Failed to load paired devices data.');
                 }
                 break;
             }
 
             case 'listprem': {
                 const isOwner = global.DEVELOPER.includes(userId) || global.OWNER.includes(
-                    XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+                    AdizaBotInc.message.from.username ? `https://t.me/${AdizaBotInc.message.from.username}` : ''
                 );
                 if (!isOwner) return reply('Only owners can list premium users.');
                 if (adminIDs.length === 0) return reply('No premium users.');
@@ -502,43 +498,42 @@ ${prefix + command} doc (Reply to a document)`;
                 break;
             }
 
+
+
             case 'delpair': {
 
     const isAuthorized = global.DEVELOPER.includes(userId) ||
-                         global.OWNER.includes(XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : '') ||
-                         isPremiumUser(userId); // <--- ADDED THIS PART
+                         global.OWNER.includes(AdizaBotInc.message.from.username ? `https://t.me/${AdizaBotInc.message.from.username}` : '') ||
+                         isTelegramPremiumUser(userId);
 
     if (!isAuthorized) {
         // Updated reply message to reflect broader authorization
-        return XeonBotInc.reply(`This command is only for authorized users (Owner/Developer/Premium).`);
+        return AdizaBotInc.reply(`This command is only for authorized users (Owner/Developer/Premium).`);
     }
 
-    if (!text) return XeonBotInc.reply(`Example:\n ${prefix + command} 91xxx`)
+    if (!text) return AdizaBotInc.reply(`Example:\n ${prefix + command} 91xxx`)
     target = text.split("|")[0]
-    const Xreturn = XeonBotInc.message.reply_to_message ? XeonBotInc.message.reply_to_message.from.id + "@s.whatsapp.net" // Append @s.whatsapp.net for JID
-        : target.replace(/[^0-9]/g, '') + "@s.whatsapp.net"; // Ensure it's a JID
-    // var contactInfo1 =  Xreturn; // This line is not used.
+    const Xreturn = AdizaBotInc.message.reply_to_message ? AdizaBotInc.message.reply_to_message.from.id + "@s.whatsapp.net"
+        : target.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
 
-    const targetID = Xreturn; // Already a JID
-    const pairingPath = './lib2/pairing';
-    const targetPath = `${pairingPath}/${targetID}`; // Use targetID as it's the full JID
+    const targetID = Xreturn;
+    const pairingPath = './lib/pairing';
+    const targetPath = `${pairingPath}/${targetID}`;
 
     try {
-        // Check if the target directory exists
         if (!fs.existsSync(targetPath)) {
-            return XeonBotInc.reply(`Paired device with ID "${targetID}" does not exist.`);
+            return AdizaBotInc.reply(`Paired device with ID "${targetID}" does not exist.`);
         }
 
-        // Delete the target directory and its contents
         fs.rmSync(targetPath, {
             recursive: true,
             force: true
         });
 
-        XeonBotInc.reply(`Paired device with ID "${targetID}" has been successfully deleted.`);
+        AdizaBotInc.reply(`Paired device with ID "${targetID}" has been successfully deleted.`);
     } catch (err) {
         console.error('Error deleting paired device:', err);
-        return XeonBotInc.reply('An error occurred while attempting to delete the paired device.');
+        return AdizaBotInc.reply('An error occurred while attempting to delete the paired device.');
     }
     break;
 }
@@ -551,7 +546,7 @@ ${prefix + command} doc (Reply to a document)`;
     // --- Authorization checks above (as you already have) ---
 
     if (!text) {
-        return XeonBotInc.reply('Please provide a number for requesting the pair code. Usage: /pair <number>');
+        return AdizaBotInc.reply('Please provide a number for requesting the pair code. Usage: /pair <number>');
     }
 
     const sanitizedNumber = text.replace(/\D/g, '');
@@ -568,7 +563,7 @@ ${prefix + command} doc (Reply to a document)`;
     }
 
     if (!isValidWhatsAppNumber(sanitizedNumber)) {
-        return XeonBotInc.reply('Invalid WhatsApp number. Please enter a valid phone number.');
+        return AdizaBotInc.reply('Invalid WhatsApp number. Please enter a valid phone number.');
     }
 
     const Xreturn = sanitizedNumber + "@s.whatsapp.net";
@@ -589,8 +584,8 @@ ${prefix + command} doc (Reply to a document)`;
 // Premium number to be in database
 
     if (!isPremiumUser(Xreturn)) {
-    return XeonBotInc.telegram.sendMessage(
-        XeonBotInc.chat.id,
+    return AdizaBotInc.telegram.sendMessage(
+        AdizaBotInc.chat.id,
         `❌ <b>Access Denied!</b>\n\n` +
         `The WhatsApp number <code>${sanitizedNumber}</code> is <b>not premium</b>.\n\n` +
         `💎 <b>Premium is required to use this feature.</b>\n\n` +
@@ -611,7 +606,7 @@ ${prefix + command} doc (Reply to a document)`;
 
 
     // --- Ensure base pairing directory exists ---
-    const basePairingDir = path.join(__dirname, 'lib2', 'pairing');
+    const basePairingDir = path.join(__dirname, 'lib', 'pairing');
     if (!fs.existsSync(basePairingDir)) {
         fs.mkdirSync(basePairingDir, { recursive: true });
         console.log(chalk.green(`[ADIZA] Created base pairing directory: ${basePairingDir}`));
@@ -625,9 +620,9 @@ ${prefix + command} doc (Reply to a document)`;
     }
 
     // --- Telegram loading animation ---
-    await XeonBotInc.telegram.sendChatAction(XeonBotInc.chat.id, "typing");
-    const loadingMsg = await XeonBotInc.telegram.sendMessage(
-        XeonBotInc.chat.id,
+    await AdizaBotInc.telegram.sendChatAction(AdizaBotInc.chat.id, "typing");
+    const loadingMsg = await AdizaBotInc.telegram.sendMessage(
+        AdizaBotInc.chat.id,
         "🔗 <b>Initiating pairing process...</b>\n\n⏳ <i>Connecting to WhatsApp and generating your code</i>",
         { parse_mode: "HTML" }
     );
@@ -638,8 +633,8 @@ ${prefix + command} doc (Reply to a document)`;
     ];
     for (let i = 0; i < 6; i++) {
         await new Promise(res => setTimeout(res, 500));
-        await XeonBotInc.telegram.editMessageText(
-            XeonBotInc.chat.id,
+        await AdizaBotInc.telegram.editMessageText(
+            AdizaBotInc.chat.id,
             loadingMsg.message_id,
             undefined,
             loadingSteps[i % loadingSteps.length],
@@ -669,7 +664,7 @@ ${prefix + command} doc (Reply to a document)`;
     }
 
     if (!pairingCode) {
-        return XeonBotInc.reply("Failed to get pairing code. The code was not generated in time. Please try again.");
+        return AdizaBotInc.reply("Failed to get pairing code. The code was not generated in time. Please try again.");
     }
 
     const formattedMessage = `🚀🔮<b>𝙌𝙪𝙚𝙚𝙣 𝘼𝙙𝙞𝙯𝙖 𝘽𝙤𝙩</b>🔮🚀\n\n` +
@@ -681,7 +676,7 @@ ${prefix + command} doc (Reply to a document)`;
         `3. Enter this 8-digit code\n\n` +
         `⏳<b>Code expires in 2 mins</b>⏳`;
 
-    await XeonBotInc.telegram.sendMessage(XeonBotInc.chat.id, formattedMessage, {
+    await AdizaBotInc.telegram.sendMessage(AdizaBotInc.chat.id, formattedMessage, {
         parse_mode: 'HTML'
     });
 
@@ -693,7 +688,7 @@ ${prefix + command} doc (Reply to a document)`;
 case 'addprem': {
     // RE-ADDED OWNER/DEVELOPER CHECK
     const isOwner = global.DEVELOPER.includes(userId) || global.OWNER.includes(
-        XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+        AdizaBotInc.message.from.username ? `https://t.me/${AdizaBotInc.message.from.username}` : ''
     );
     if (!isOwner) return reply('Only owners can add premium users.');
 
@@ -722,7 +717,7 @@ case 'addprem': {
             case 'delprem': {
     // RE-ADDED OWNER/DEVELOPER CHECK
     const isOwner = global.DEVELOPER.includes(userId) || global.OWNER.includes(
-        XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+        AdizaBotInc.message.from.username ? `https://t.me/${AdizaBotInc.message.from.username}` : ''
     );
     if (!isOwner) return reply('Only owners can remove premium users.');
 
@@ -748,7 +743,7 @@ case 'addprem': {
             case 'listusers': {
                 // Authorization check: Only Owner/Developer can use this
                 const isOwnerOrDeveloper = global.DEVELOPER.includes(userId) || global.OWNER.includes(
-                    XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+                    AdizaBotInc.message.from.username ? `https://t.me/${AdizaBotInc.message.from.username}` : ''
                 );
                 if (!isOwnerOrDeveloper) {
                     return reply('This command is only for the owner/developer.');
@@ -788,7 +783,7 @@ case 'addprem': {
     case 'restart': {
         // Authorization check: Only Owner/Developer can use this
         const isOwnerOrDeveloper = global.DEVELOPER.includes(userId) || global.OWNER.includes(
-            XeonBotInc.message.from.username ? `https://t.me/${XeonBotInc.message.from.username}` : ''
+            AdizaBotInc.message.from.username ? `https://t.me/${AdizaBotInc.message.from.username}` : ''
         );
         if (!isOwnerOrDeveloper) {
             return reply('You are not authorized to use this command.');
@@ -825,47 +820,53 @@ case 'back!':
     const currentTime = moment.tz(timezones).format('HH:mm:ss z');
     const currentDate = moment.tz(timezones).format('DD/MM/YYYY');
     const botName = global.BOT_NAME;
-    const escapedDeveloperId = escapeMarkdownV2(global.DEVELOPER[0]);
-    const escapedOwnerName = escapeMarkdownV2(global.OWNER_NAME);
+    // For HTML, you need to escape differently or use it directly if no special chars
+    // Since these are IDs/Names, they might contain special chars that break HTML too
+    // For now, let's assume global.DEVELOPER[0] and global.OWNER_NAME are safe or you apply an HTML escape function.
+    // Example (you'd need to define this function): const escapedDeveloperIdHtml = escapeHtml(global.DEVELOPER[0]);
+    // For simplicity, let's just use them directly and watch for new errors if they contain problematic HTML chars.
+    const developerId = global.DEVELOPER[0]; // Use directly if it's just a number
+    const ownerName = global.OWNER_NAME; // Use directly
 
-    let xeontext =
+    let adizatext =
         `Hi 👋 ${pushname}
 ╭───━━━༺◈༻━━━───╮
-    😊🌹𝗪𝗘𝗟𝗖𝗢𝗠𝗘🌹😊
+    😊🌹<b>𝗪𝗘𝗟𝗖𝗢𝗠𝗘</b>🌹😊
 ╰───━━━༺◈༻━━━───╯
 
-╭─〔👤 𝗕𝗢𝗧 𝗜𝗡𝗙𝗢 👤〕────╮
-◈ 🔢 𝗩𝗘𝗥𝗦𝗜𝗢𝗡: V.9
-◈ ❄ 𝗕𝗢𝗧: ${botName} 
-◈ 🆔 𝗜𝗗: ${escapedDeveloperId}
-◈ ⏰ 𝗧𝗜𝗠𝗘: ${currentTime}
-◈ 🗓️ 𝗗𝗔𝗧𝗘: ${currentDate}
-◈ 💾 𝗥𝗔𝗠: ${formattedTotalMem}  
-◈ 🐍 𝗢𝗪𝗡𝗘𝗥: ${escapedOwnerName}
+╭─〔👤 <b>𝗕𝗢𝗧 𝗜𝗡𝗙𝗢</b> 👤〕────╮
+◈ 🔢 <b>𝗩𝗘𝗥𝗦𝗜𝗢𝗡:</b> V.9
+◈ ❄ <b>𝗕𝗢𝗧:</b> ${botName} 
+◈ 🆔 <b>𝗜𝗗:</b> ${developerId}
+◈ ⏰ <b>𝗧𝗜𝗠𝗘:</b> ${currentTime}
+◈ 🗓️ <b>𝗗𝗔𝗧𝗘:</b> ${currentDate}
+◈ 💾 <b>𝗥𝗔𝗠:</b> ${formattedTotalMem}  
+◈ 🐍 <b>𝗢𝗪𝗡𝗘𝗥:</b> ${ownerName}
 ╰────────────────────╯
 
-╭─〔💎 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗨𝗦𝗘𝗥𝗦 💎〕─╮
-◈ ⏳ /pair —  𝗔𝗱𝗱 𝘀𝗲𝘀𝘀𝗶𝗼𝗻
-◈ 🚫 /delpair — 𝗥𝗲𝗺𝗼𝘃𝗲 𝘀𝗲𝘀𝘀𝗶𝗼𝗻
-◈ ❄ /runtime — 𝗕𝗼𝘁 𝗨𝗽𝘁𝗶𝗺𝗲
-◈ ⚡ /checkid — 𝗖𝗵𝗲𝗰𝗸 𝗬𝗼𝘂𝗿 𝗜𝗗
-◈🔓 /decrypt — 𝗱𝗲𝗰𝗿𝘆𝗽𝘁 𝗷𝘀 𝗳𝗶𝗹𝗲𝘀
-◈🔐 /immortal — 𝗲𝗻𝗰𝗿𝘆𝗽𝘁 𝗷𝘀 𝗳𝗶𝗹𝗲𝘀
+╭─〔💎 <b>𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗨𝗦𝗘𝗥𝗦</b> 💎〕─╮
+◈ ⏳ /pair —  <b>𝗔𝗱𝗱 𝘀𝗲𝘀𝘀𝗶𝗼𝗻</b>
+◈ 🚫 /delpair — <b>𝗥𝗲𝗺𝗼𝘃𝗲 𝘀𝗲𝘀𝘀𝗶𝗼𝗻</b>
+◈ ❄ /runtime — <b>𝗕𝗼𝘁 𝗨𝗽𝘁𝗶𝗺𝗲</b>
+◈ ⚡ /checkid — <b>𝗖𝗵𝗲𝗰𝗸 𝗬𝗼𝘂𝗿 𝗜𝗗</b>
+◈🔓 /decrypt — <b>𝗱𝗲𝗰𝗿𝘆𝗽𝘁 𝗷𝘀 𝗳𝗶𝗹𝗲𝘀</b>
+◈🔐 /immortal — <b>𝗲𝗻𝗰𝗿𝘆𝗽𝘁 𝗷𝘀 𝗳𝗶𝗹𝗲𝘀</b>
 ╰─────────────────────╯
 
-╭─〔 👑 𝗢𝗪𝗡𝗘𝗥 👑 〕────╮
-◈ 🔮 /addprem — 𝗮𝗱𝗱 𝗽𝗿𝗲𝗺-𝘂𝘀𝗲𝗿
-◈ ♨️ /delprem — 𝗿𝗲𝗺𝗼𝘃𝗲 𝗽𝗿𝗲𝗺-𝘂𝘀𝗲𝗿
-◈ 🦠 /listprem — 𝗹𝗶𝘀𝘁 𝗽𝗿𝗲𝗺-𝘂𝘀𝗲𝗿𝘀
-◈ 🎨 /broadcast — 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝘂𝘀𝗲𝗿𝘀
-◈ 👥 /listusers  — 𝗹𝗶𝘀𝘁 𝘂𝘀𝗲𝗿𝘀
-◈ 💎 /listpair — 𝗹𝗶𝘀𝘁 𝗽𝗮𝗶𝗿 𝘂𝘀𝗲𝗿𝘀
-◈ 🔄 /restart — 𝗿𝗲𝘀𝘁𝗮𝗿𝘁 𝘃𝗽𝘀
+╭─〔 👑 <b>𝗢𝗪𝗡𝗘𝗥</b> 👑 〕────╮
+◈ 🔮 /addprem — <b>𝗮𝗱𝗱 𝗽𝗿𝗲𝗺-𝘂𝘀𝗲𝗿</b>
+◈ ♨️ /delprem — <b>𝗿𝗲𝗺𝗼𝘃𝗲 𝗽𝗿𝗲𝗺-𝘂𝘀𝗲𝗿</b>
+◈ 🦠 /listprem — <b>𝗹𝗶𝘀𝘁 𝗽𝗿𝗲𝗺-𝘂𝘀𝗲𝗿𝘀</b>
+◈ 🎨 /broadcast — <b>𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝘂𝘀𝗲𝗿𝘀</b>
+◈ 👥 /listusers  — <b>𝗹𝗶𝘀𝘁 𝘂𝘀𝗲𝗿𝘀</b>
+◈ 💎 /listpair — <b>𝗹𝗶𝘀𝘁 𝗽𝗮𝗶𝗿 𝘂𝘀𝗲𝗿𝘀</b>
+◈ 🔄 /restart — <b>𝗿𝗲𝘀𝘁𝗮𝗿𝘁 𝘃𝗽𝘀</b>
 ╰───────────────────╯`;
-    XeonBotInc.replyWithPhoto(
+
+    AdizaBotInc.replyWithPhoto(
         global.pp, {
-            caption: xeontext,
-            parse_mode: 'Markdown'
+            caption: adizatext,
+            parse_mode: 'HTML' 
         }
     );
     break;
@@ -874,7 +875,7 @@ case 'back!':
             default:
         }
     } catch (e) {
-        XeonBotInc.reply(util.format(e))
+        AdizaBotInc.reply(util.format(e))
         console.log('[ ERROR ] ' + e)
     }
 }

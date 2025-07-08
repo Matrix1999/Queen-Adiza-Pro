@@ -14,6 +14,8 @@ const AdmZip = require('adm-zip');
 let chatHistory = {};
 const { jidDecode } = require("@whiskeysockets/baileys");
 const { calculateExpiry, isPremium, checkCommandAccess } = require('./lib/premiumSystem');
+
+const botSentMessageIds = new Set();
 const callCounts = {};
 const handledCallIds = new Set();
 const util = require('util')
@@ -30,6 +32,7 @@ const cheerio = require('cheerio')
 const process = require('process');
 const moment = require("moment-timezone")
 const lolcatjs = require('lolcatjs')
+let lastProcessedMessageId = {};
 const os = require('os');
 const speed = require('performance-now')
 const { performance } = require('perf_hooks');
@@ -51,6 +54,8 @@ const STATUS_REACTION_COOLDOWN_MS = 10 * 1000;
 
 const generalReactionCooldowns = new Map();
 const GENERAL_REACTION_COOLDOWN_MS = 10 * 1000;
+
+
 
 
 const {
@@ -83,6 +88,468 @@ const {
     bytesToSize,
     checkBandwidth,
 } = require('./lib/myfunc')
+
+
+
+
+// --- AVAILABLE_APIS: 
+const AVAILABLE_APIS = {
+    "gemini": {
+        displayName: "Gemini (2.5 flash)",
+        type: "gemini_sdk"
+    },
+    "gpt3": {
+        displayName: "GPT-3 (Neo)",
+        url: (conversation) => `https://api.siputzx.my.id/api/ai/gpt3?prompt=You%20are%20a%20helpful%20assistant&content=${encodeURIComponent(conversation)}`,
+        type: "external_url",
+        responseKey: "result",
+        usesRawText: false
+    },
+    "llama3": {
+        displayName: "Meta Llama 3 (Ultra)",
+        url: (conversation) => `https://api.siputzx.my.id/api/ai/meta-llama-33-70B-instruct-turbo?content=${encodeURIComponent(conversation)}`,
+        type: "external_url",
+        responseKey: "data",
+        usesRawText: false
+    },
+    "evilgpt": {
+        displayName: "EvilGPT (WormGpt Mode)",
+        url: (query) => `https://umar-wormgpt.ma-coder-x.workers.dev/?query=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "response", 
+        usesRawText: true
+    },
+    "jarvis": {
+        displayName: "Jarvis Chat (Prime)",
+        url: (userTextContent) => `https://bk9.fun/ai/jeeves-chat?q=${encodeURIComponent(userTextContent)}`,
+        type: "external_url",
+        responseKey: "BK9",
+        usesRawText: true
+    },
+    "chatgpt": {
+        displayName: "ChatGPT (orion pro)",
+        url: (query) => `https://apis.davidcyriltech.my.id/ai/chatbot?query=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "result",
+        usesRawText: true
+    },
+    "perplexity": {
+        displayName: "Perplexity (advance)",
+        url: (query) => `https://bk9.fun/ai/Perplexity?q=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "BK9.answer",
+        usesRawText: true
+    },
+    "blackbox": {
+        displayName: "Blackbox (ultra)",
+        url: (query) => `https://bk9.fun/ai/gemini?q=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "BK9",
+        usesRawText: true
+    },
+    "dbrx": {
+        displayName: "DBRX (quantum)",
+        url: (query) => `https://api.siputzx.my.id/api/ai/dbrx-instruct?content=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "data",
+        usesRawText: true
+    },
+    "islamicai": {
+        displayName: "Islamic AI (noor)",
+        url: (query) => `https://bk9.fun/ai/Islam-ai?q=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "BK9",
+        usesRawText: true
+    },
+    "openai": {
+        displayName: "OpenAI (vapis)",
+        url: (query) => `https://vapis.my.id/api/openai?q=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "result",
+        usesRawText: true
+    },
+    "deepseekllm": {
+        displayName: "DeepSeek (pro)",
+        url: (query) => `https://api.siputzx.my.id/api/ai/deepseek-llm-67b-chat?content=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "data",
+        usesRawText: true
+    },
+    "doppleai": {
+        displayName: "DoppleAI (xploader)",
+        url: (query) => `https://xploader-api.vercel.app/doppleai?prompt=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "response",
+        usesRawText: true
+    },
+    "letterai": {
+        displayName: "LetterAI (SiputzX)",
+        url: (query) => `https://api.siputzx.my.id/api/ai/moshiai?input=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "data",
+        usesRawText: true
+    },
+    "metaai": {
+        displayName: "MetaAI (Meta)",
+        url: (query) => `https://bk9.fun/ai/llama?q=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "BK9",
+        usesRawText: true
+    },
+    "mistral": {
+        displayName: "Mistral (storm)",
+        url: (query) => `https://api.siputzx.my.id/api/ai/mistral-7b-instruct-v0.2?content=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseKey: "data",
+        usesRawText: true
+    },
+    "generate": {
+        displayName: "Image (GuruSensei)",
+        url: (query) => `https://api.gurusensei.workers.dev/dream?prompt=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseType: "image",
+        usesRawText: true,
+        directImageUrl: true
+    },
+    "imagen": {
+        displayName: "Photorealistic (Mastery)",
+        url: (query) => `https://bk9.fun/ai/magicstudio?prompt=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseType: "image",
+        usesRawText: true,
+        directImageUrl: true
+    },
+    "imagine": {
+        displayName: "Imagine X (Flux)",
+        url: (query) => `https://api.siputzx.my.id/api/ai/flux?prompt=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseType: "image",
+        usesRawText: true,
+        directImageUrl: true
+    },
+    "photoai": {
+        displayName: "Realism (Dreamshaper)",
+        url: (query) => `https://api.siputzx.my.id/api/ai/dreamshaper?prompt=${encodeURIComponent(query)}`,
+        type: "external_url",
+        responseType: "image",
+        usesRawText: true,
+        directImageUrl: true
+    },
+    "anime4k": {
+    displayName: "Animes Image Generator",
+    type: "hazex_multi_image",
+    baseUrl: "https://img.hazex.workers.dev/",
+    usesRawText: true,
+    url: (query) => `https://img.hazex.workers.dev/?prompt=${encodeURIComponent(query)}`,
+    responseType: "image",
+    directImageUrl: true
+       }
+
+};
+
+
+
+
+// Gemini API key
+global.GEMINI_API_KEY = 'AIzaSyDcOFBb5tX5rB7PyxlOhVeXa2cfrYIDKLI'; //
+const geminiApiKey = global.GEMINI_API_KEY; //
+
+let genAI;
+let geminiModel;
+
+if (geminiApiKey) {
+  genAI = new GoogleGenerativeAI(geminiApiKey); //
+  geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" }); //
+
+  const safetySettings = [
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE }, //
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE }, //
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE }, //
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }, //
+  ];
+  geminiModel.safetySettings = safetySettings; //
+  console.log("✅ Gemini-1.5-flash model initialized with safety settings."); //
+} else {
+  console.warn("⚠️ global.GEMINI_API_KEY is not set. Gemini multi-modal input features will be disabled."); //
+}
+
+
+// Function to convert a Baileys message media to a Gemini Generative Part
+// `m` here is the full Baileys message object (data.messages[0])
+async function fileToGenerativePart(m, Matrix) { //
+    let mediaType; //
+    // 'image', 'video', 'document', 'audio'
+    let mediaContent; //
+    // The specific message part (e.g., m.message.imageMessage)
+    let messageTypeFromBaileys = m.mtype; //
+
+    console.log(`[Gemini-FileProcess] Starting processing for message type: ${messageTypeFromBaileys}`); //
+    // Identify the type of media message from the Baileys message object (m.message)
+    if (m.message.imageMessage) {
+        mediaType = 'image'; //
+        mediaContent = m.message.imageMessage; //
+    } else if (m.message.videoMessage) {
+        mediaType = 'video'; //
+        mediaContent = m.message.videoMessage; //
+    } else if (m.message.documentMessage) {
+        mediaType = 'document'; //
+        mediaContent = m.message.documentMessage; //
+    } else if (m.message.audioMessage) {
+        mediaType = 'audio'; //
+        mediaContent = m.message.audioMessage; //
+    } else {
+        console.warn(`[Gemini-FileProcess] Unrecognized message type for multi-modal: ${messageTypeFromBaileys}. Returning null.`); //
+        await Matrix.sendMessage(m.chat, { text: `I cannot directly process this type of media (\`${messageTypeFromBaileys}\`) with Gemini. I support images, videos, audio, and common documents.` }, { quoted: m }); //
+        return null; //
+    }
+
+    if (!mediaContent) {
+        console.error(`[Gemini-FileProcess] mediaContent is null for type ${messageTypeFromBaileys}. This should not happen.`); //
+        await Matrix.sendMessage(m.chat, { text: `Error: Media content missing for ${messageTypeFromBaileys}.` }, { quoted: m }); //
+        return null; //
+    }
+    console.log(`[Gemini-FileProcess] Identified mediaType: ${mediaType}`); //
+
+    let stream;
+    try {
+        stream = await downloadContentFromMessage(mediaContent, mediaType); //
+        console.log(`[Gemini-FileProcess] Stream received for download.`); //
+    } catch (error) {
+        console.error(`[Gemini-FileProcess] Error downloading content from message (${mediaType}):`, error); //
+        await Matrix.sendMessage(m.chat, { text: `An error occurred while downloading your media: ${error.message}` }, { quoted: m }); //
+        return null; //
+    }
+
+    const bufferArray = [];
+    try {
+        for await (const chunk of stream) {
+            bufferArray.push(chunk); //
+        }
+        const buffer = Buffer.concat(bufferArray); //
+        console.log(`[Gemini-FileProcess] Buffer created. Size: ${buffer.length} bytes.`); //
+        if (buffer.length === 0) {
+            console.error(`[Gemini-FileProcess] Downloaded buffer is empty for message ID: ${m.key.id}.`); //
+            await Matrix.sendMessage(m.chat, { text: `Downloaded media is empty. Cannot process for AI.` }, { quoted: m }); //
+            return null; //
+        }
+
+        let mimeType = mediaContent.mimetype; //
+        if (!mimeType) {
+            console.log('[Gemini-FileProcess] Mimetype not found in message. Trying to infer from buffer.'); //
+            try {
+                const fileTypeResult = await fromBuffer(buffer); //
+                mimeType = fileTypeResult ? fileTypeResult.mime : 'application/octet-stream'; //
+                console.log(`[Gemini-FileProcess] Inferred mimetype: ${mimeType}`); //
+            } catch (e) {
+                console.warn("[Gemini-FileProcess] Could not determine MIME type from buffer, falling back to basic checks:", e); //
+                if (mediaType === 'image') mimeType = 'image/jpeg'; //
+                else if (mediaType === 'video') mimeType = 'video/mp4'; //
+                else if (mediaType === 'audio') mimeType = 'audio/mpeg'; //
+                else if (mediaType === 'document') mimeType = 'application/octet-stream'; //
+                console.log(`[Gemini-FileProcess] Fallback mimetype: ${mimeType}`); //
+            }
+        } else {
+            console.log(`[Gemini-FileProcess] Mimetype from message: ${mimeType}`); //
+        }
+
+        // Supported MIME types
+        const supportedImageMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']; //
+        const supportedVideoMimes = ['video/mp4', 'video/webm']; //
+        const supportedAudioMimes = [
+            'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/aac', 'audio/flac', 'audio/webm', 'audio/ogg; codecs=opus' //
+        ];
+        const supportedDocumentMimes = [
+            'text/plain', 'application/pdf',
+            'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation' //
+        ];
+        // Add code/text file support
+        const supportedTextMimes = [
+            'text/plain', 'text/x-python', 'application/javascript', 'application/json',
+            'text/csv', 'text/html', 'text/css', 'application/xml', 'application/x-sh', 'application/x-csh' //
+        ];
+        // Supported text/code file extensions for ZIP extraction
+        const supportedTextExtensions = /\.(txt|py|js|json|csv|md|html|css|xml)$/i; //
+        if (supportedImageMimes.includes(mimeType)) {
+            console.log(`[Gemini-FileProcess] Returning image generative part with MIME: ${mimeType}`); //
+            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } }; //
+        } else if (supportedVideoMimes.includes(mimeType)) {
+            console.log(`[Gemini-FileProcess] Returning video generative part with MIME: ${mimeType}`); //
+            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } }; //
+        } else if (supportedAudioMimes.includes(mimeType)) {
+            console.log(`[Gemini-FileProcess] Returning audio generative part with MIME: ${mimeType}`); //
+            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } }; //
+        } else if (mimeType === 'application/zip') {
+            // --- ZIP Extraction Logic ---
+            try {
+                const zip = new AdmZip(buffer); //
+                const entries = zip.getEntries(); //
+                let extractedTexts = [];
+                for (const entry of entries) {
+                    if (!entry.isDirectory && supportedTextExtensions.test(entry.entryName)) {
+                        const fileContent = entry.getData().toString('utf8'); //
+                        extractedTexts.push(`File: ${entry.entryName}\n${fileContent}`); //
+                    }
+                }
+                if (extractedTexts.length > 0) {
+                    const combinedText = extractedTexts.join('\n\n'); //
+                    console.log(`[Gemini-FileProcess] Returning extracted text from ZIP (${entries.length} files, ${extractedTexts.length} supported).`); //
+                    return { text: combinedText }; //
+                } else {
+                    await Matrix.sendMessage(m.chat, { text: `⚠️ ZIP file contains no supported text/code files (txt, py, js, json, csv, etc).` }, { quoted: m }); //
+                    return null; //
+                }
+            } catch (zipError) {
+                console.error(`[Gemini-FileProcess] Error extracting ZIP:`, zipError); //
+                await Matrix.sendMessage(m.chat, { text: `⚠️ Failed to extract ZIP file: ${zipError.message}` }, { quoted: m }); //
+                return null; //
+            }
+        } else if (supportedDocumentMimes.includes(mimeType)) {
+            console.log(`[Gemini-FileProcess] Returning document generative part with MIME: ${mimeType}`); //
+            return { inlineData: { data: buffer.toString('base64'), mimeType: mimeType } }; //
+        } else if (supportedTextMimes.includes(mimeType)) {
+            // For code/text files, treat as text
+            const textContent = buffer.toString('utf8'); //
+            console.log(`[Gemini-FileProcess] Returning text part for code/text file with MIME: ${mimeType}`); //
+            return { text: textContent }; //
+        } else {
+            console.warn(`[Gemini] Unsupported MIME type for Gemini: ${mimeType} for message ID: ${m.key.id}`); //
+            await Matrix.sendMessage(m.chat, {
+                text: `⚠️ Gemini does not fully support files of type \`${mimeType}\`. I can process common images, videos, audio, documents, and code/text files (js, py, txt, json, csv, etc.).`, //
+            }, { quoted: m });
+            return null; //
+        }
+    } catch (error) {
+        console.error(`[Gemini-FileProcess] Critical error during buffer processing/base64 conversion:`, error); //
+        await Matrix.sendMessage(m.chat, { text: `A critical error occurred while processing your media for AI: ${error.message}` }, { quoted: m }); //
+        return null; //
+    }
+}
+
+
+// New: Adizachat User States file
+const ADIZACHAT_USER_STATES_FILE = path.join(__dirname, 'lib', 'adizachat_user_states.json'); //
+// New: Global variable for Adizachat user states database
+let adizaUserStatesDb; //
+
+// New: Function to load Adizachat user states
+function loadAdizaUserStates() { //
+    try {
+        fs.mkdirSync(path.dirname(ADIZACHAT_USER_STATES_FILE), { recursive: true }); //
+        if (fs.existsSync(ADIZACHAT_USER_STATES_FILE)) { //
+            const data = fs.readFileSync(ADIZACHAT_USER_STATES_FILE, 'utf8'); //
+            adizaUserStatesDb = JSON.parse(data); //
+            console.log('Adizachat user states loaded from:', ADIZACHAT_USER_STATES_FILE); //
+        } else {
+            adizaUserStatesDb = { userApiStates: {} }; //
+            fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2)); //
+            console.warn('Adizachat user states file not found, created a new one at:', ADIZACHAT_USER_STATES_FILE); //
+        }
+    } catch (err) {
+        console.error('Error loading Adizachat user states:', err); //
+        adizaUserStatesDb = { userApiStates: {} }; // Fallback to empty if error //
+    }
+    return adizaUserStatesDb; //
+}
+
+// New: Function to save Adizachat user states
+function saveAdizaUserStates() { //
+    try {
+        fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2)); //
+        console.log('Adizachat user states saved to:', ADIZACHAT_USER_STATES_FILE); //
+    } catch (err) {
+        console.error('Error saving Adizachat user states:', err); //
+    }
+}
+
+// New: Helper function to get or initialize user API state
+function getUserApiState(userId) { //
+    if (!adizaUserStatesDb.userApiStates[userId]) {
+        adizaUserStatesDb.userApiStates[userId] = {
+            currentApi: "gemini", // Default API //
+            isSelecting: false,
+            enabled: false
+        };
+    }
+    return adizaUserStatesDb.userApiStates[userId]; //
+}
+
+// New: Helper function to set current user API
+function setCurrentUserApi(userId, modelKey) { //
+    if (AVAILABLE_APIS[modelKey]) {
+        getUserApiState(userId).currentApi = modelKey; //
+        saveAdizaUserStates(); //
+        return true;
+    }
+    return false;
+}
+
+
+
+
+
+// Call loadAdizaUserStates when the bot starts
+loadAdizaUserStates(); //
+
+
+// New: Helper function for typing presence
+async function withTyping(Matrix, chatId, fn) {
+    await Matrix.sendPresenceUpdate('composing', chatId); // Baileys specific 'composing'
+    try {
+        return await fn();
+    } finally {
+        // No explicit way to stop typing status in Baileys, it usually stops after sendMessage
+    }
+}
+
+// New: Helper function to split long messages (adapted from group.js)
+function splitMessage(text, maxLength = 4096) { // Max length for WhatsApp messages is higher, but 4096 is a good general split point
+    if (text.length <= maxLength) {
+        return [text];
+    }
+
+    const parts = [];
+    let remainingText = text;
+    let partNumber = 1;
+
+    while (remainingText.length > 0) {
+        const headerPlaceholderLength = 40; // For "(Part X of Y)\n\n"
+        const effectiveChunkLength = maxLength - headerPlaceholderLength;
+
+        let chunk = remainingText.substring(0, effectiveChunkLength);
+        let lastSafeBreak = effectiveChunkLength;
+
+        if (chunk.length === effectiveChunkLength) {
+            let lastNewline = chunk.lastIndexOf('\n');
+            let lastPeriod = chunk.lastIndexOf('.');
+            let lastSpace = chunk.lastIndexOf(' ');
+
+            const minBreakPoint = effectiveChunkLength * 0.8;
+
+            if (lastNewline > minBreakPoint) {
+                lastSafeBreak = lastNewline + 1;
+            } else if (lastPeriod > minBreakPoint) {
+                lastSafeBreak = lastPeriod + 1;
+            } else if (lastSpace > minBreakPoint) {
+                lastSafeBreak = lastSpace + 1;
+            }
+        }
+        
+        let actualChunk = remainingText.substring(0, lastSafeBreak);
+        parts.push(actualChunk);
+        remainingText = remainingText.substring(actualChunk.length).trimStart();
+        partNumber++;
+    }
+
+    const totalParts = parts.length;
+    for (let i = 0; i < totalParts; i++) {
+        const partIndicator = `(Part ${i + 1} of ${totalParts})\n\n`;
+        parts[i] = partIndicator + parts[i];
+    }
+
+    return parts;
+}
 
 //delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -168,6 +635,7 @@ global.db.data.settings ??= {
   autoread: false,
   welcome: false,
   adizachat: false,
+  gemini: false, 
   antiedit: "private",
   menustyle: "2",
   autoreact: false,
@@ -188,223 +656,222 @@ global.db.write();
 
 
 module.exports = Matrix = async (Matrix, m, chatUpdate, store) => {
-    try {
-        const { type, quotedMsg, mentioned, now, fromMe } = m;
+try {
+const { type, quotedMsg, mentioned, now, fromMe } = m;
 
-        if (!Matrix.user || !Matrix.user.id) {
-            console.log("DEBUG: Matrix.user or Matrix.user.id not available yet. Skipping message processing.");
-            return; // Exit if bot user info isn't ready
+
+if (!Matrix.user || !Matrix.user.id) {
+
+    return; // Exit if bot user info isn't ready
+}
+
+
+// Get the JID of the current bot instance
+// --- IMPORTANT FIX: NORMALIZE botJid HERE TO REMOVE DEVICE ID (:XX) ---
+const botJid = jidNormalizedUser(Matrix.user.id); // Use jidNormalizedUser to ensure consistent JID format
+
+// --- START MODIFICATION FOR BOT INSTANCE SETTINGS
+
+const BOT_FALLBACK_PREFIX = '.';
+const BOT_FALLBACK_MODE = "public"; // Default mode for any bot instance not specifically configured.
+
+
+if (!global.db.data.users[botJid]) {
+    global.db.data.users[botJid] = {};
+    global.db.data.users[botJid].prefix ??= BOT_FALLBACK_PREFIX;
+    global.db.data.users[botJid].mode ??= BOT_FALLBACK_MODE;
+    global.db.data.users[botJid].autobio ??= false;
+    global.db.data.users[botJid].autotype ??= false;
+    global.db.data.users[botJid].anticall ??= "off";
+    global.db.data.users[botJid].autoread ??= false;
+    global.db.data.users[botJid].adizachat ??= false;
+    global.db.data.users[botJid].statusemoji ??= "🧡";
+    global.db.data.users[botJid].welcome ??= false;
+    global.db.data.users[botJid].autoreact ??= false;
+    global.db.data.users[botJid].antidelete ??= "private";
+    global.db.data.users[botJid].antiedit ??= "private";
+    global.db.data.users[botJid].alwaysonline ??= false;
+    global.db.data.users[botJid].autorecord ??= false;
+    global.db.data.users[botJid].autoviewstatus ??= false;
+    global.db.data.users[botJid].autoreactstatus ??= false;
+    global.db.data.users[botJid].menustyle ??= "2"; // Default menu style
+}
+
+const botInstanceSettings = global.db.data.users[botJid];
+const prefix = botInstanceSettings.prefix;
+const mode = botInstanceSettings.mode;
+
+// --- END MODIFICATION FOR BOT INSTANCE
+
+
+
+var body =
+  m.message?.protocolMessage?.editedMessage?.conversation ||
+  m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
+  m.message?.protocolMessage?.editedMessage?.imageMessage?.caption ||
+  m.message?.protocolMessage?.editedMessage?.videoMessage?.caption ||
+  m.message?.conversation ||
+  m.message?.imageMessage?.caption ||
+  m.message?.videoMessage?.caption ||
+  m.message?.extendedTextMessage?.text ||
+  m.message?.buttonsResponseMessage?.selectedButtonId ||
+  m.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+  m.message?.templateButtonReplyMessage?.selectedId ||
+  m.message?.pollCreationMessageV3?.name ||
+  m.message?.documentMessage?.caption ||
+  m.text || "";
+
+var budy =
+  typeof body === "string" && body.length > 0
+    ? body
+    : typeof m.text === "string"
+      ? m.text
+      : "";
+
+
+const isCmd = body.startsWith(prefix);
+const trimmedBody = isCmd ? body.slice(prefix.length).trimStart() : "";
+
+//command
+const command = isCmd && trimmedBody ? trimmedBody.split(/\s+/).shift().toLowerCase() : "";
+
+
+m.isCmd = isCmd; // Attach isCmd to the m object
+m.command = command; // Attach command to the m object
+// ************************
+
+const args = trimmedBody.split(/\s+/).slice(1);
+const text = args.join(" ");
+const q = text;
+const full_args = body.replace(command, '').slice(1).trim();
+const pushname = m.pushName || "No Name";
+
+// Using botJid directly instead of redeclaring botNumber
+// --- IMPORTANT FIX: botNumber should now be the normalized JID from botJid ---
+const botNumber = botJid; // Already determined as Matrix.user.id and now normalized
+
+const sender = m.sender;
+const senderNumber = sender.split('@')[0];
+const sudoList = Array.isArray(global.db.data.settings.sudo) ? global.db.data.settings.sudo : [];
+
+const allCreatorJids = new Set([
+  // Normalize devMatrix if it's just a number
+  devMatrix.includes('@s.whatsapp.net') ? devMatrix : `${devMatrix}@s.whatsapp.net`,
+  // Normalize global.ownernumber if it's just a number
+  global.ownernumber.includes('@s.whatsapp.net') ? global.ownernumber : `${global.ownernumber}@s.whatsapp.net`,
+
+  ...sudoList.map(jid => jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`)
+]);
+
+const isCreator = allCreatorJids.has(sender);
+const itsMe = sender === botNumber;
+const from = m.key.remoteJid;
+const quotedMessage = m.quoted || m;
+const quoted =
+  quotedMessage?.mtype === "buttonsMessage"
+    ? quotedMessage[Object.keys(quotedMessage)[1]]
+    : quotedMessage?.mtype === "templateMessage" && quotedMessage.hydratedTemplate
+    ? quotedMessage.hydratedTemplate[Object.keys(quotedMessage.hydratedTemplate)[1]]
+    : quotedMessage?.mtype === "product"
+    ? quotedMessage[Object.keys(quotedMessage)[0]]
+    : m.quoted || m; // Fallback for other quoted message types
+const mime = quoted?.msg?.mimetype || quoted?.mimetype || "";
+
+
+// Retrieve sender's premium status for access bypass
+const isSenderPremium = isPremium(m.sender); // Assumes `isPremium` is imported at the top of system.js
+
+// ======= Mode check: restrict commands based on user's mode =======
+// `mode` is already defined at the top as the bot instance's mode
+if (isCmd) {
+  if (mode === "private" && !isCreator && !isSenderPremium) {
+    // Private mode: only creator and premium users can run commands
+    return await Matrix.sendMessage(from, {
+      text: "⚠️ Your bot is currently in *private* mode. Only the owner and premium users can use commands."
+    }, { quoted: m });
+  }
+  if (mode === "group" && !m.isGroup && !isCreator && !isSenderPremium) {
+    // Group only mode: block commands outside groups for non-owner/non-premium
+    return await Matrix.sendMessage(from, {
+      text: "⚠️ Your bot is currently in *group only* mode. Commands work only in groups."
+    }, { quoted: m });
+  }
+  if (mode === "pm" && m.isGroup && !isCreator && !isSenderPremium) {
+    // PM only mode: block commands in groups for non-owner/non-premium
+    return await Matrix.sendMessage(from, {
+      text: "⚠️ Your bot is currently in *private chat only* mode. Commands work only in private chats."
+    }, { quoted: m });
+  }
+  // Public mode: allow all commands (no explicit `return` here, so command proceeds)
+}
+// =======================================================
+
+
+
+    // <----------------------------------------------------------------------------------------------------->
+    // PLACE THE NEW STATUS HANDLING BLOCK HERE
+    // <---------------------------------------------------------------------------------------------------->
+
+    const botInstanceSettingsForStatus = global.db.data.users[botJid] || {}; // Reuse botJid
+    const instanceAutoviewStatus = botInstanceSettingsForStatus.autoviewstatus ?? global.db.data.settings.autoviewstatus ?? true; // Default to true
+    const instanceAutoreactStatus = botInstanceSettingsForStatus.autoreactstatus ?? global.db.data.settings.autoreactstatus ?? false; // Default to false
+    const instanceStatusEmoji = botInstanceSettingsForStatus.statusemoji || global.db.data.settings.statusemoji || '🧡'; // Default to '🧡'
+
+    if (m.key && m.key.remoteJid === 'status@broadcast') {
+
+
+      if (instanceAutoviewStatus === true) {
+        try { // <-- ADDED TRY BLOCK
+          await Matrix.readMessages([m.key]);
+
+        } catch (readErr) { // <-- ADDED CATCH BLOCK
+          console.error(`[STATUS ERROR] Failed to read status for ${m.key.remoteJid} by ${botJid}:`, readErr); // <-- ERROR LOG
         }
+      }
 
-        // --- IMPORTANT FIX: Ensure global.db.data.users is initialized before use ---
-        if (!global.db || !global.db.data) {
-            console.error("Error: global.db or global.db.data is undefined. Database not loaded.");
-            return; // Exit if database isn't ready
-        }
-        if (!global.db.data.users) {
-            global.db.data.users = {}; // Initialize users object if it's undefined
-            console.warn("global.db.data.users was undefined, initialized as empty object.");
-        }
-        // --- END IMPORTANT FIX ---
+      if (instanceAutoreactStatus === true && instanceAutoviewStatus === true) {
+        // --- START COOLDOWN LOGIC FOR REACTIONS ---
+        const lastReactionTime = statusReactionCooldowns.get(botJid);
+        const now = Date.now();
 
-        // Get the JID of the current bot instance
-        // --- IMPORTANT FIX: NORMALIZE botJid HERE TO REMOVE DEVICE ID (:XX) ---
-        const botJid = jidNormalizedUser(Matrix.user.id); // Use jidNormalizedUser to ensure consistent JID format
+        if (lastReactionTime && (now - lastReactionTime < STATUS_REACTION_COOLDOWN_MS)) {
 
-        // --- START MODIFICATION FOR BOT INSTANCE SETTINGS
+          // Skip reacting if cooldown is active
+        } else {
+          // Cooldown passed or no previous reaction, proceed to react
+          const reactionEmoji = instanceStatusEmoji;
+          const participant = m.key.participant || m.participant;
+          const messageId = m.key.id;
 
-        const BOT_FALLBACK_PREFIX = '.';
-        const BOT_FALLBACK_MODE = "public"; // Default mode for any bot instance not specifically configured.
+          if (participant && messageId && m.key.id && m.key.remoteJid) {
+            try { // <-- ADDED TRY BLOCK FOR SEND MESSAGE
+              await Matrix.sendMessage(
+                'status@broadcast',
+                {
+                  react: {
+                    key: {
+                      id: m.key.id,
+                      remoteJid: m.key.remoteJid,
+                      participant: participant,
+                    },
+                    text: reactionEmoji,
+                  },
+                },
+                { statusJidList: [participant, botJid] }
+              );
+              statusReactionCooldowns.set(botJid, now);
 
-        if (!global.db.data.users[botJid]) {
-            global.db.data.users[botJid] = {};
-            global.db.data.users[botJid].prefix ??= BOT_FALLBACK_PREFIX;
-            global.db.data.users[botJid].mode ??= BOT_FALLBACK_MODE;
-            global.db.data.users[botJid].autobio ??= false;
-            global.db.data.users[botJid].autotype ??= false;
-            global.db.data.users[botJid].anticall ??= "off";
-            global.db.data.users[botJid].autoread ??= false;
-            global.db.data.users[botJid].adizachat ??= false;
-            global.db.data.users[botJid].statusemoji ??= "🧡";
-            global.db.data.users[botJid].welcome ??= false;
-            global.db.data.users[botJid].autoreact ??= false;
-            global.db.data.users[botJid].antidelete ??= "private";
-            global.db.data.users[botJid].antiedit ??= "private";
-            global.db.data.users[botJid].alwaysonline ??= false;
-            global.db.data.users[botJid].autorecord ??= false;
-            global.db.data.users[botJid].autoviewstatus ??= false;
-            global.db.data.users[botJid].autoreactstatus ??= false;
-            global.db.data.users[botJid].menustyle ??= "2"; // Default menu style
-        }
-
-        const botInstanceSettings = global.db.data.users[botJid];
-        const prefix = botInstanceSettings.prefix;
-        const mode = botInstanceSettings.mode;
-
-        // --- END MODIFICATION FOR BOT INSTANCE
-
-        var body =
-            m.message?.protocolMessage?.editedMessage?.conversation ||
-            m.message?.protocolMessage?.editedMessage?.extendedTextMessage?.text ||
-            m.message?.protocolMessage?.editedMessage?.imageMessage?.caption ||
-            m.message?.protocolMessage?.editedMessage?.videoMessage?.caption ||
-            m.message?.conversation ||
-            m.message?.imageMessage?.caption ||
-            m.message?.videoMessage?.caption ||
-            m.message?.extendedTextMessage?.text ||
-            m.message?.buttonsResponseMessage?.selectedButtonId ||
-            m.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
-            m.message?.templateButtonReplyMessage?.selectedId ||
-            m.message?.pollCreationMessageV3?.name ||
-            m.message?.documentMessage?.caption ||
-            m.text || "";
-
-        var budy =
-            typeof body === "string" && body.length > 0 ?
-            body :
-            typeof m.text === "string" ?
-            m.text :
-            "";
-
-        const isCmd = body.startsWith(prefix);
-        const trimmedBody = isCmd ? body.slice(prefix.length).trimStart() : "";
-
-        //command
-        const command = isCmd && trimmedBody ? trimmedBody.split(/\s+/).shift().toLowerCase() : "";
-
-        m.isCmd = isCmd; // Attach isCmd to the m object
-        m.command = command; // Attach command to the m object
-        // ************************
-
-        const args = trimmedBody.split(/\s+/).slice(1);
-        const text = args.join(" ");
-        const q = text;
-        const full_args = body.replace(command, '').slice(1).trim();
-        const pushname = m.pushName || "No Name";
-
-        // Using botJid directly instead of redeclaring botNumber
-        // --- IMPORTANT FIX: botNumber should now be the normalized JID from botJid ---
-        const botNumber = botJid; // Already determined as Matrix.user.id and now normalized
-
-        const sender = m.sender;
-        const senderNumber = sender.split('@')[0];
-        const sudoList = Array.isArray(global.db.data.settings.sudo) ? global.db.data.settings.sudo : [];
-
-        const allCreatorJids = new Set([
-            // Normalize devMatrix if it's just a number
-            devMatrix.includes('@s.whatsapp.net') ? devMatrix : `${devMatrix}@s.whatsapp.net`,
-            // Normalize global.ownernumber if it's just a number
-            global.ownernumber.includes('@s.whatsapp.net') ? global.ownernumber : `${global.ownernumber}@s.whatsapp.net`,
-
-            ...sudoList.map(jid => jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`)
-        ]);
-
-        const isCreator = allCreatorJids.has(sender);
-        const itsMe = sender === botNumber;
-        const from = m.key.remoteJid;
-        const quotedMessage = m.quoted || m;
-        const quoted =
-            quotedMessage?.mtype === "buttonsMessage" ?
-            quotedMessage[Object.keys(quotedMessage)[1]] :
-            quotedMessage?.mtype === "templateMessage" && quotedMessage.hydratedTemplate ?
-            quotedMessage.hydratedTemplate[Object.keys(quotedMessage.hydratedTemplate)[1]] :
-            quotedMessage?.mtype === "product" ?
-            quotedMessage[Object.keys(quotedMessage)[0]] :
-            m.quoted || m; // Fallback for other quoted message types
-        const mime = quoted?.msg?.mimetype || quoted?.mimetype || "";
-
-
-        // Retrieve sender's premium status for access bypass
-        const isSenderPremium = isPremium(m.sender); // Assumes `isPremium` is imported at the top of system.js
-
-        // ======= Mode check: restrict commands based on user's mode =======
-        // `mode` is already defined at the top as the bot instance's mode
-        if (isCmd) {
-            if (mode === "private" && !isCreator && !isSenderPremium) {
-                // Private mode: only creator and premium users can run commands
-                return await Matrix.sendMessage(from, {
-                    text: "⚠️ Your bot is currently in *private* mode. Only the owner and premium users can use commands."
-                }, { quoted: m });
-            }
-            if (mode === "group" && !m.isGroup && !isCreator && !isSenderPremium) {
-                // Group only mode: block commands outside groups for non-owner/non-premium
-                return await Matrix.sendMessage(from, {
-                    text: "⚠️ Your bot is currently in *group only* mode. Commands work only in groups."
-                }, { quoted: m });
-            }
-            if (mode === "pm" && m.isGroup && !isCreator && !isSenderPremium) {
-                // PM only mode: block commands in groups for non-owner/non-premium
-                return await Matrix.sendMessage(from, {
-                    text: "⚠️ Your bot is currently in *private chat only* mode. Commands work only in private chats."
-                }, { quoted: m });
-            }
-            // Public mode: allow all commands (no explicit `return` here, so command proceeds)
-        }
-        // =======================================================
-
-        // <----------------------------------------------------------------------------------------------------->
-        // PLACE THE NEW STATUS HANDLING BLOCK HERE
-        // <---------------------------------------------------------------------------------------------------->
-
-        const botInstanceSettingsForStatus = global.db.data.users[botJid] || {}; // Reuse botJid
-        const instanceAutoviewStatus = botInstanceSettingsForStatus.autoviewstatus ?? global.db.data.settings.autoviewstatus ?? true; // Default to true
-        const instanceAutoreactStatus = botInstanceSettingsForStatus.autoreactstatus ?? global.db.data.settings.autoreactstatus ?? false; // Default to false
-        const instanceStatusEmoji = botInstanceSettingsForStatus.statusemoji || global.db.data.settings.statusemoji || '🧡'; // Default to '🧡'
-
-        if (m.key && m.key.remoteJid === 'status@broadcast') {
-
-
-            if (instanceAutoviewStatus === true) {
-                try { // <-- ADDED TRY BLOCK
-                    await Matrix.readMessages([m.key]);
-                    console.log(`[STATUS DEBUG] Successfully attempted to read status for ${m.key.remoteJid} by ${botJid}`); // <-- SUCCESS LOG
-                } catch (readErr) { // <-- ADDED CATCH BLOCK
-                    console.error(`[STATUS ERROR] Failed to read status for ${m.key.remoteJid} by ${botJid}:`, readErr); // <-- ERROR LOG
-                }
-            }
-
-            if (instanceAutoreactStatus === true && instanceAutoviewStatus === true) {
-                // --- START COOLDOWN LOGIC FOR REACTIONS ---
-                const lastReactionTime = statusReactionCooldowns.get(botJid);
-                const now = Date.now();
-
-                if (lastReactionTime && (now - lastReactionTime < STATUS_REACTION_COOLDOWN_MS)) {
-                    console.log(`[STATUS DEBUG] Skipped reaction for ${botJid} due to cooldown.`);
-                    // Skip reacting if cooldown is active
-                } else {
-                    // Cooldown passed or no previous reaction, proceed to react
-                    const reactionEmoji = instanceStatusEmoji;
-                    const participant = m.key.participant || m.participant;
-                    const messageId = m.key.id;
-
-                    if (participant && messageId && m.key.id && m.key.remoteJid) {
-                        try { // <-- ADDED TRY BLOCK FOR SEND MESSAGE
-                            await Matrix.sendMessage(
-                                'status@broadcast', {
-                                    react: {
-                                        key: {
-                                            id: m.key.id,
-                                            remoteJid: m.key.remoteJid,
-                                            participant: participant,
-                                        },
-                                        text: reactionEmoji,
-                                    },
-                                }, { statusJidList: [participant, botJid] }
-                            );
-                            statusReactionCooldowns.set(botJid, now); // Update last reaction time for this bot
-                            console.log(`[STATUS DEBUG] Successfully sent reaction '${reactionEmoji}' for status by ${botJid}`); // <-- SUCCESS LOG FOR REACTION
-                        } catch (reactErr) { // <-- ADDED CATCH BLOCK FOR SEND MESSAGE
-                            console.error(`[STATUS ERROR] Failed to send reaction for status by ${botJid}:`, reactErr); // <-- ERROR LOG FOR REACTION
-                        }
-                    }
-                }
+            } catch (reactErr) { // <-- ADDED CATCH BLOCK FOR SEND MESSAGE
 
             }
-            console.log(`-----------------------------------\n`); // Move end debug log here to cover entire status block
-            return; // Exit here if it's a status message
+          }
         }
-        // <---------------------------------------------------------------------------------------------------------------->
 
+      }
+      console.log(`-----------------------------------\n`); // Move end debug log here to cover entire status block
+      return; // Exit here if it's a status message
+    }
+    // <---------------------------------------------------------------------------------------------------------------->
 
 /// ========================GROUP METADATA===========================//
 
@@ -861,9 +1328,290 @@ if (global.db.data.users[botJid]?.autotype) {
 }
 
 //<================================================>//
-    // ANTIBOT
+//Message Handler-mesaages.upsert//
+//<================================================>//
+//  CHATBOTS
+
+Matrix.ev.on("messages.upsert", async (data) => {
+    const message = data.messages[0];
+    if (!message || !message.message) return;
+
+    const botNumber = safeDecodeJid(Matrix.user.id);
+    const isGroup = message.key.remoteJid.endsWith("@g.us");
+    const sender = message.sender || message.key.participant || message.key.remoteJid;
+    const messageId = message.key.id;
+    const isSelfChat = message.chat === sender;
+
+    // Prevent duplicate replies
+    if (lastProcessedMessageId[sender] === messageId) return;
+    lastProcessedMessageId[sender] = messageId;
+
+    // --- CRITICAL: Ignore messages sent by the bot itself in self-chat ---
+    if (isSelfChat && botSentMessageIds.has(messageId)) {
+
+        return;
+    }
+
+    const safeChatId = safeDecodeJid(message.chat);
+    if (!safeChatId) return;
+
+    const prefix = global.db?.data?.settings?.prefix || ".";
+
+    // --- Extract text/caption ---
+    const originalUserTextContent = (
+        message.message.extendedTextMessage?.text ||
+        message.message.conversation ||
+        message.message.imageMessage?.caption ||
+        message.message.videoMessage?.caption ||
+        message.message.documentMessage?.caption || ""
+    ).trim();
+
+    // Normalize message: lowercase, collapse spaces, trim
+    const msgText = originalUserTextContent.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    // --- AI LOGIC STARTS HERE ---
+    const userState = getUserApiState(sender);
+
     
 
+    // --- GEMINI LOGIC ---
+    const selectedApiKey = userState.currentApi;
+    const selectedApiInfo = AVAILABLE_APIS[selectedApiKey];
+
+    if (
+        userState.enabled &&
+        selectedApiInfo &&
+        selectedApiInfo.type === "gemini_sdk" &&
+        !isGroup &&
+        (
+          (isSelfChat && !botSentMessageIds.has(messageId)) ||
+          (!isSelfChat && message.key.fromMe !== true)
+        ) &&
+        (message.message.extendedTextMessage || message.message.conversation ||
+         message.message.imageMessage || message.message.videoMessage ||
+         message.message.documentMessage || message.message.audioMessage)
+    ) {
+        try {
+            let geminiInputParts = [];
+            let generativePart = null;
+
+            // Handle media input
+            const hasMedia =
+                !!message.message.imageMessage ||
+                !!message.message.videoMessage ||
+                !!message.message.documentMessage ||
+                !!message.message.audioMessage;
+
+            if (hasMedia) {
+                generativePart = await fileToGenerativePart(message, Matrix);
+            }
+
+            if (originalUserTextContent) geminiInputParts.push({ text: originalUserTextContent });
+            if (generativePart) geminiInputParts.push(generativePart);
+
+            if (geminiInputParts.length === 0) {
+                const sentMsg = await Matrix.sendMessage(safeChatId, { text: "❌ Please send a message or supported file." }, { quoted: message });
+                botSentMessageIds.add(sentMsg.key.id);
+                return;
+            }
+
+            // Maintain chat history per user
+            if (!chatHistory[sender]) chatHistory[sender] = {};
+            if (!chatHistory[sender].conversations) chatHistory[sender].conversations = [];
+            chatHistory[sender].conversations.push({ role: "user", parts: geminiInputParts });
+            if (chatHistory[sender].conversations.length > 12) {
+                chatHistory[sender].conversations = chatHistory[sender].conversations.slice(-12);
+            }
+
+            // Prepare Gemini chat history
+            let historyForGemini = chatHistory[sender].conversations
+                .slice(0, -1)
+                .filter(entry => entry.role === "user" || entry.role === "assistant")
+                .map(entry => {
+                    if (entry.parts) {
+                        return { role: entry.role === "user" ? "user" : "model", parts: entry.parts };
+                    } else if (entry.content) {
+                        return { role: entry.role === "user" ? "user" : "model", parts: [{ text: entry.content }] };
+                    }
+                    return null;
+                })
+                .filter(entry => entry !== null);
+
+            while (historyForGemini.length > 0 && historyForGemini[0].role !== "user") {
+                historyForGemini.shift();
+            }
+
+            const chat = geminiModel.startChat({
+                history: historyForGemini.length > 0 ? historyForGemini : undefined,
+                safetySettings: geminiModel.safetySettings,
+            });
+
+            const currentUserInputParts = chatHistory[sender].conversations[chatHistory[sender].conversations.length - 1]?.parts;
+            if (!currentUserInputParts || currentUserInputParts.length === 0) {
+                throw new Error("No valid parts found in the current user message for Gemini.");
+            }
+
+            await Matrix.sendMessage(safeChatId, { react: { text: "✨", key: message.key } });
+            const result = await chat.sendMessage(currentUserInputParts);
+            const response = await result.response;
+            const responseText = response.text();
+
+            // Store assistant reply in history
+            chatHistory[sender].conversations.push({ role: "assistant", parts: [{ text: responseText }] });
+
+            // Split long replies
+            const messageParts = splitMessage(responseText);
+            for (const part of messageParts) {
+                const sentMsg = await Matrix.sendMessage(safeChatId, { text: part }, { quoted: message });
+                botSentMessageIds.add(sentMsg.key.id);
+                await delay(200);
+            }
+        } catch (e) {
+            console.error("[ERROR] Gemini API call error:", e);
+            let errorMessage = "Sorry, I couldn't process that. ";
+            if (e.response && e.response.status === 429) {
+                errorMessage = "I'm receiving too many requests right now. Please try again in a moment!";
+            } else if (e.message.includes("400 Bad Request") || e.message.includes("blocked") || e.message.includes("invalid input")) {
+                errorMessage += "It might contain content that violates safety guidelines, or there was an issue with the input. Please try a different query or file.";
+            } else if (e.message.includes("No valid input") || e.message.includes("No valid parts")) {
+                errorMessage += "I couldn't process your input (maybe the file type isn't supported).";
+            } else if (e.message.includes("Gemini API Key is not configured")) {
+                errorMessage = "My Gemini model is not configured. Please contact the bot owner.";
+            } else {
+                errorMessage += `Error: \`${String(e.message).substring(0, 100)}\``;
+            }
+            const sentMsg = await Matrix.sendMessage(safeChatId, { text: errorMessage }, { quoted: message });
+            botSentMessageIds.add(sentMsg.key.id);
+        }
+        return; // <--- Make sure to return after handling Gemini!
+    }
+
+    // --- OTHER AI MODELS LOGIC STARTS HERE ---
+    if (
+        userState.enabled &&
+        selectedApiInfo &&
+        selectedApiInfo.type !== "gemini_sdk" &&
+        !isGroup &&
+        (
+          (isSelfChat && !botSentMessageIds.has(messageId)) ||
+          (!isSelfChat && message.key.fromMe !== true)
+        ) &&
+        (message.message.extendedTextMessage || message.message.conversation ||
+         message.message.imageMessage || message.message.videoMessage ||
+         message.message.documentMessage || message.message.audioMessage)
+    ) {
+        try {
+            // --- MULTI-IMAGE GENERATION FEATURE ---
+            const photoRequestRegex = /^send\s+(\d+)\s+photos?\s+of\s+(.+)/i;
+            const photoMatch = originalUserTextContent.match(photoRequestRegex);
+
+            if (
+                selectedApiInfo.responseType === "image" &&
+                selectedApiInfo.directImageUrl &&
+                photoMatch
+            ) {
+                let count = parseInt(photoMatch[1]);
+                if (isNaN(count) || count < 1) count = 1;
+                if (count > 10) count = 10; // Max limit to prevent abuse
+
+                const prompt = photoMatch[2].trim();
+                if (!prompt) {
+                    await Matrix.sendMessage(safeChatId, { text: "❌ Please provide a prompt for the images." }, { quoted: message });
+                    return;
+                }
+
+                await Matrix.sendMessage(safeChatId, {
+                    text: `🖼️ Sending ${count} photos of ${prompt}...`
+                }, { quoted: message });
+
+                let mediaArray = [];
+                for (let i = 0; i < count; i++) {
+                    try {
+                        const imageUrl = selectedApiInfo.url(prompt);
+                        mediaArray.push({ url: imageUrl });
+                        // Minimal delay for speed
+                        await delay(150);
+                    } catch (e) {
+                        // Only log the error to the terminal, don't send to WhatsApp
+                        console.error(`[IMAGE ERROR] ${selectedApiInfo.displayName}: ${e.message}`);
+                        break;
+                    }
+                }
+
+                // Send as album if possible, else one by one
+                if (mediaArray.length > 1 && Matrix.sendMessage.length >= 3) {
+                    await Matrix.sendMessage(safeChatId, {
+                        image: mediaArray
+                    }, { quoted: message });
+                } else if (mediaArray.length === 1) {
+                    await Matrix.sendMessage(safeChatId, {
+                        image: { url: mediaArray[0].url }
+                    }, { quoted: message });
+                } else if (mediaArray.length > 1) {
+                    // If we can't send as album, send one by one
+                    for (const img of mediaArray) {
+                        await Matrix.sendMessage(safeChatId, {
+                            image: { url: img.url }
+                        }, { quoted: message });
+                        await delay(150);
+                    }
+                }
+                botSentMessageIds.add(messageId);
+                return;
+            }
+
+            // --- IMAGE MODELS ---
+            if (selectedApiInfo.responseType === "image" && selectedApiInfo.directImageUrl) {
+                const imageUrl = selectedApiInfo.url(originalUserTextContent || "");
+                const sentMsg = await Matrix.sendMessage(safeChatId, {
+                    image: { url: imageUrl }
+                }, { quoted: message });
+                botSentMessageIds.add(sentMsg.key.id);
+                return;
+            }
+
+            // --- TEXT MODELS ---
+            const apiUrl = selectedApiInfo.url(originalUserTextContent || "");
+            const response = await fetch(apiUrl);
+            const data = await response.json();
+
+            let responseText = null;
+            if (selectedApiInfo.responseKey) {
+                const keys = selectedApiInfo.responseKey.split(".");
+                let value = data;
+                for (const key of keys) {
+                    value = value?.[key];
+                    if (value === undefined) break;
+                }
+                responseText = value;
+            } else if (selectedApiInfo.usesRawText) {
+                responseText = data;
+            }
+
+            if (!responseText) {
+                const sentMsg = await Matrix.sendMessage(safeChatId, { text: "❌ No valid response from API." }, { quoted: message });
+                botSentMessageIds.add(sentMsg.key.id);
+                return;
+            }
+
+            const messageParts = splitMessage(responseText);
+            for (const part of messageParts) {
+                const sentMsg = await Matrix.sendMessage(safeChatId, { text: part }, { quoted: message });
+                botSentMessageIds.add(sentMsg.key.id);
+                await delay(200);
+            }
+        } catch (e) {
+            // Only log error to terminal, do not send to WhatsApp
+            console.error(`[ERROR] ${selectedApiKey} API call error:`, e);
+        }
+        return; // <--- Make sure to return after handling!
+    }
+    // --- OTHER AI MODELS LOGIC ENDS HERE ---
+
+
+});
+
+//<================================================>//
 
 
 //<================================================>//
@@ -1545,8 +2293,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiaudio) {
         });
         delete global.audioCounts[senderId];
       } catch (kickError) {
-        console.error('[ANTIAUDIO] Error kicking user:', kickError); // Kept for actual errors
-        // Reply to the group if kicking fails, useful for debugging bot permissions
+
         await m.reply(`[ANTIAUDIO] Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${kickError.message}`);
       }
     }
@@ -1601,8 +2348,7 @@ if (m.chat.endsWith('@g.us') && db.data.chats[m.chat]?.antiimage) {
         });
         delete global.imageCounts[senderId]; // Reset count after kick
       } catch (err) {
-        console.error('Error kicking user:', err);
-        // Reply to the group if kicking fails, useful for debugging bot permissions
+
         await m.reply(`Failed to kick @${senderId.split('@')[0]}. Please check bot permissions. Error: ${err.message}`);
       }
     }
@@ -1618,12 +2364,7 @@ if (m.chat.endsWith("@g.us") && db.data.chats[m.chat]?.antisticker) {
   const senderId  = m.sender;
   const isSticker = msg.stickerMessage;
 
-  // Exemption logic: A sticker message will be acted upon ONLY IF:
-  // 1. It is a sticker message (`isSticker`)
-  // 2. The sender is NOT a group admin (`!isGroupAdmins`)
-  // 3. The sender is NOT the bot creator (`!isCreator`)
-  // 4. The message is NOT from the bot itself (`!m.key.fromMe`)
-  // 5. The bot IS an admin in the group (`isBotAdmins`)
+  
   if (isSticker && !isGroupAdmins && !isCreator && !m.key.fromMe && isBotAdmins) {
     const now = m.messageTimestamp * 1000;
     global.stickerCounts[senderId] = global.stickerCounts[senderId] || { count: 0, lastTimestamp: 0 };
@@ -1662,8 +2403,7 @@ if (m.chat.endsWith("@g.us") && db.data.chats[m.chat]?.antisticker) {
         });
         delete global.stickerCounts[senderId]; // Reset count after kick
       } catch (kickError) {
-        console.error("Error kicking user:", kickError);
-        // Reply to the group if kicking fails, useful for debugging bot permissions
+
         await m.reply(`Failed to kick @${senderId.split("@")[0]}. Please check bot permissions. Error: ${kickError.message}`);
       }
     }
@@ -2349,86 +3089,7 @@ if (
 //=================================================//
 
 
-// The chatbot handler (which was previously in the removed Matrix.ev.on) should go here.
-// I'll put it back, adapting it to use the 'm' object passed to the main function.
 
-if (
-    global.db.data.settings.adizachat === true && // Changed from `chatbot` to `adizachat` as per your db.data.settings
-    (m.message.extendedTextMessage?.text || m.message.conversation) &&
-    !m.key.fromMe && // Use m.key.fromMe (true if bot sent it)
-    !m.isGroup && // Check if it's a private chat
-    !command // Only respond if it's not a command
-) {
-    try {
-        const userId = m.sender;
-        const userMessage = m.message.extendedTextMessage?.text || m.message.conversation || '';
-
-        if (!userMessage.trim()) {
-            return;
-        }
-
-        // --- Prevent duplicate replies for chatbot ---
-        if (lastProcessedMessageId[userId] === m.key.id) {
-            return; // Already responded to this message for chatbot
-        }
-        lastProcessedMessageId[userId] = m.key.id;
-        // --- END Prevent duplicate replies ---
-
-
-        await Matrix.sendPresenceUpdate('composing', m.chat);
-        await Matrix.sendMessage(m.chat, { react: { text: "⏱️", key: m.key } }); // LINE OF ERROR, THIS IS IT!
-
-        if (!chatHistory[userId]) chatHistory[userId] = [];
-
-        // Add user message to history
-        chatHistory[userId].push({ role: "user", content: userMessage.trim() });
-        // Limit history to last 6 messages (or whatever you prefer)
-        if (chatHistory[userId].length > 6) {
-            chatHistory[userId] = chatHistory[userId].slice(-6);
-        }
-
-        // Construct conversation for API (APIs might prefer different formats)
-        const conversation = chatHistory[userId]
-            .map(x => `${x.role}: ${x.content}`)
-            .join("\n");
-
-
-        const apiUrls = [
-            `https://api.siputzx.my.id/api/ai/gpt3?prompt=You%20are%20a%20helpful%20assistant&content=${encodeURIComponent(conversation)}`,
-            `https://api.siputzx.my.id/api/ai/meta-llama-33-70B-instruct-turbo?content=${encodeURIComponent(conversation)}`,
-            `https://bk9.fun/ai/jeeves-chat?q=${encodeURIComponent(userMessage.trim())}` // Using promptText directly for this API
-        ];
-
-        let responseText = null;
-
-        for (let i = 0; i < apiUrls.length; i++) {
-            try {
-                const res = await axios.get(apiUrls[i]);
-                const data = res.data;
-                if (data?.data || data?.BK9 || data?.response || data?.result) {
-                    responseText = data.data || data.BK9 || data.response || data.result;
-                    break;
-                }
-            } catch (e) {
-                console.error(`Chatbot API ${i + 1} failed:`, e.message);
-            }
-        }
-
-        if (responseText) {
-            chatHistory[userId].push({ role: "assistant", content: responseText });
-            await Matrix.sendMessage(m.chat, { text: responseText }, { quoted: m });
-            await Matrix.sendMessage(m.chat, { react: { text: "💬", key: m.key } });
-        } else {
-            await Matrix.sendMessage(m.chat, { text: "❌ Failed to get a valid response from the chatbot." }, { quoted: m });
-            await Matrix.sendMessage(m.chat, { react: { text: "✖️", key: m.key } });
-        }
-
-    } catch (err) {
-        console.error("Chatbot handler error:", err);
-        await Matrix.sendMessage(m.chat, { text: "⚠️ An error occurred while processing the chatbot command." }, { quoted: m });
-        await Matrix.sendMessage(m.chat, { react: { text: "✖️", key: m.key } });
-    }
-}
 //<================================================>//
 
 //<================================================>//
@@ -2588,37 +3249,29 @@ const { pluginManager } = require('./index');
   ephoto,
   loadBlacklist,
   mainOwner,
+  adizaUserStatesDb, 
+  getUserApiState,   
+  saveAdizaUserStates, 
+  AVAILABLE_APIS,   
 
 }; // <-- This is the correct closing brace for the context object
 
 // Process commands
 if (command) {
     try {
-        // --- DEBUG LOGS ---
-        console.log(`[DEBUG] Plugin Command detected: "${command}" by sender: "${m.sender}"`);
-        console.log(`[DEBUG] isCreator (human owner/sudo): ${isCreator}`); // Now reflects human owners only
-        const debugIsUserPremium = isPremium(m.sender);
-        console.log(`[DEBUG] isPremium(sender) for "${m.sender}": ${debugIsUserPremium}`);
-        // --- END DEBUG LOGS ---
 
         // START OF PREMIUM CHECK INSERTION FOR PLUGINS
-        // The 'if (m.sender === botNumber)' bypass has been removed from here.
-        console.log(`[DEBUG] Attempting premium check for plugin command: "${command}"`);
+
         const blockedByPremium = await checkCommandAccess(Matrix, m, isCreator, command, mess); // isCreator is now only human owners
-        console.log(`[DEBUG] Result of checkCommandAccess for plugin command "${command}": ${blockedByPremium ? 'BLOCKED' : 'ALLOWED'}`);
 
         if (blockedByPremium) {
-            console.log(`[DEBUG] Plugin command "${command}" was blocked by premium check. Returning.`);
             return; // Stop execution if blocked
         }
         // END OF PREMIUM CHECK INSERTION FOR PLUGINS
 
-        console.log(`[DEBUG] Plugin command "${command}" allowed. Executing plugin.`);
         const handled = await pluginManager.executePlugin(context, command);
-        console.log(`[DEBUG] Plugin for "${command}" executed. Handled: ${handled}`);
 
     } catch (error) {
-        console.error(`Error executing plugin command "${command}":`, error.message);
         Matrix.sendMessage(Matrix.user.id, { text: `An error occurred while executing the command "${command}": ${error.message}` });
     }
 }
@@ -2630,28 +3283,20 @@ switch (command) {
 //=================================================//
 
 case "menu":
-    // --- DEBUG LOGS ---
-    console.log(`[DEBUG] Switch Command detected: "menu" by sender: "${m.sender}"`);
-    console.log(`[DEBUG] isCreator (human owner/sudo): ${isCreator}`); // Now reflects human owners only
-    const debugIsUserPremiumMenu = isPremium(m.sender);
-    console.log(`[DEBUG] isPremium(m.sender) for "menu": ${debugIsUserPremiumMenu}`);
-    // --- END DEBUG LOGS ---
 
     // START OF PREMIUM CHECK FOR 'menu' COMMAND
-    // The 'if (m.sender === botNumber)' bypass has been removed from here.
-    console.log(`[DEBUG] Attempting premium check for switch command: "menu"`);
-    const blockedByPremiumForMenu = await checkCommandAccess(Matrix, m, isCreator, command, mess); // isCreator is now only human owners
-    console.log(`[DEBUG] Result of checkCommandAccess for switch command "menu": ${blockedByPremiumForMenu ? 'BLOCKED' : 'ALLOWED'}`);
+
+    const blockedByPremiumForMenu = await checkCommandAccess(Matrix, m, isCreator, command, mess); 
+
     if (blockedByPremiumForMenu) {
-        console.log(`[DEBUG] Switch command "menu" was blocked by premium check. Returning.`);
+    
         return; // Stop execution if blocked
     }
     // END OF PREMIUM CHECK FOR 'menu' COMMAND
 
-    console.log(`[DEBUG] Switch command "menu" allowed. Executing menu logic.`);
 
-    const formatMemory = (memory) => {
-        return memory < 1024 * 1024 * 1024
+            const formatMemory = (memory) => {
+            return memory < 1024 * 1024 * 1024
             ? Math.round(memory / 1024 / 1024) + ' MB'
             : Math.round(memory / 1024 / 1024 / 1024) + ' GB';
     };
