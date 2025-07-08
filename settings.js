@@ -23,9 +23,9 @@ global.SESSION_ID = process.env.SESSION_ID || ''
 global.botname = process.env.BOT_NAME || 'Queen-Adiza'
 
 //--------------------[ TELEGRAM BOT SETTINGS ]----------------------//
-global.BOT_TOKEN = process.env.BOT_TOKEN || "8038555102:AAE63xWoeX2WVB_sDT46LzUiwZNpxaCvwQI" // Telegram bot token
+global.BOT_TOKEN = process.env.BOT_TOKEN || "7992929848:AAGrK35akkgJclY7f9cF4cAXoYlo-honGV0" // Telegram bot token
 
-global.BOT_NAME = process.env.TELEGRAM_BOT_NAME || "AdizaPair_Bot" // Telegram bot name
+global.BOT_NAME = process.env.TELEGRAM_BOT_NAME || "RashidaPair_bot" // Telegram bot name
 
 global.OWNER_NAME = process.env.TELEGRAM_OWNER_NAME || "@Matrixxxxxxxxx" // Telegram owner name with sign @
 
