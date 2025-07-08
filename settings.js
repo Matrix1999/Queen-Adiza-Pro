@@ -38,9 +38,9 @@ global.pp = process.env.BOT_PP_URL || 'https://files.catbox.moe/pa6ok8.jpg' // T
 //-----------------[ OWNER NUMBER (WhatsApp) ]------------------//
 
 //-----------------[ OWNER NUMBER (WhatsApp) ]------------------//
-global.ownernumber = process.env.OWNER_NUMBER || '233593734312' 
+global.ownernumber = process.env.OWNER_NUMBER || '233544981163' 
 
-global.owner = JSON.parse(process.env.WHATSAPP_OWNER_NUMBERS || '["233593734312@s.whatsapp.net"]')
+global.owner = JSON.parse(process.env.WHATSAPP_OWNER_NUMBERS || '["233544981163@s.whatsapp.net"]')
 
 //-----------------[ OWNER NAME (WhatsApp) ]------------------//
 
