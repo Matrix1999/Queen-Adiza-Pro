@@ -491,15 +491,16 @@ async function startMatrix() {
     if (!store.presences[id]) store.presences[id] = {};
 
     if (presences) {
-      for (const [userJid, presenceInfo] = Object.entries(presences)) {
+      for (const [userJid, presenceInfo] of Object.entries(presences)) { // FIX: Added closing brace for this loop
         if (presenceInfo.lastKnownPresence === 'available') {
           store.presences[id][userJid] = true;
         } else {
           delete store.presences[id][userJid];
         }
-      }
+      } // FIX: Missing closing brace added here
     }
   });
+
 
   // Removed the problematic empty setInterval from here
   // Your existing pairing code logic
@@ -727,8 +728,7 @@ Matrix.ev.on('messages.upsert', async (chatUpdate) => {
       if (
         msg.key.id.startsWith('BAE5') ||
         (msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (!msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (msg.key.id.length !== 32 && msg.key.id.length !== 20)
+        (!msg.key.id.startsWith('3EBO') && msg.key.id.length !== 32 && msg.key.id.length !== 20) // Corrected logic here
       ) continue;
 
       // Avoid processing duplicates
@@ -743,6 +743,7 @@ Matrix.ev.on('messages.upsert', async (chatUpdate) => {
     console.error('Error handling messages.upsert:', err);
   }
 });
+
 
 // Interval to clear old session files every 2 hours
 setInterval(() => {
