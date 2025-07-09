@@ -296,8 +296,9 @@ await global.db.write();
 
 
 if (global.dbToken) {
-    setInterval(writeDB, 30 * 60 * 1000);
+    setInterval(global.writeDB, 30 * 60 * 1000); // <-- This is the crucial fix
 }
+
 
 if (global.db) setInterval(async () => {
     if (global.db.data) await global.db.write();
