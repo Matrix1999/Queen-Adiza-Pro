@@ -201,8 +201,26 @@ async function uploadPairingSessions() {
     await createPairingRepo();
     ensureLocalPairingDir();
     await downloadPairingSessions();
-    // Now your pairing repo is ready and sessions restored before pairing starts
+
+    // After sessions are restored, start all pairing sessions automatically
+    const basePairingDir = path.join(__dirname, 'lib', 'pairing');
+    if (fs.existsSync(basePairingDir)) {
+        const userDirs = await fs.promises.readdir(basePairingDir);
+        for (const userDir of userDirs) {
+            const sessionPath = path.join(basePairingDir, userDir);
+            const stat = await fs.promises.lstat(sessionPath);
+            if (stat.isDirectory()) {
+                console.log(`[RENTPOT] Starting pairing session for ${userDir}`);
+                startpairing(userDir).catch(err => {
+                    console.error(`[RENTPOT] Failed to start pairing for ${userDir}:`, err);
+                });
+                // Optional: small delay between starts to avoid race conditions
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+    }
 })();
+
 
 // --- GITHUB SYNC ADDITIONS END ---
 
@@ -467,7 +485,7 @@ async function startpairing(MatrixNumber) {
        if (global.dbToken) {
     setInterval(() => {
                 uploadPairingSessions().catch(console.error);
-            }, 10 * 60 * 1000); // every 10 minutes
+            }, 15 * 60 * 1000); // every 15 minutes
         }
 
     } catch (err) {
