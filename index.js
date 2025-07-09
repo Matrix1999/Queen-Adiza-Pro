@@ -70,7 +70,7 @@ const versions = require("./package.json").version
 const PluginManager = require('./lib/PluginManager');
 const pluginManager = new PluginManager(path.resolve(__dirname, './src/Plugins'));
 
-const ownernumber = "233593734312"; // or load from config/env
+const ownernumber = "233544981163"; // or load from config/env
 
 
 // Database
