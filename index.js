@@ -266,7 +266,7 @@ global.writeDB = async function () {
 })(); // End of the main async IIFE
 
 if (global.dbToken) {
-    setInterval(global.writeDB, 30 * 60 * 1000);
+    setInterval(global.writeDB, 5 * 60 * 1000); // 5 minutes
 }
 
 if (global.db) setInterval(async () => {
