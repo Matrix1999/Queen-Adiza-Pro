@@ -56,7 +56,7 @@ global.author = process.env.STICKER_AUTHOR_NAME || "Adizatu"
 
 //----------------[ GITHUB DATABASE ]-----------------//
 
-global.dbToken = process.env.GITHUB_TOKEN || "";
+global.dbToken = process.env.GITHUB_TOKEN || "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";
 
 
 //-----------------[ CONTEXT LINK ]--------------------//
