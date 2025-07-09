@@ -1,12 +1,13 @@
+
 require('events').EventEmitter.defaultMaxListeners = 50;
-require('./settings');
+require('./settings'); 
 const {
     Telegraf,
     Markup
 } = require('telegraf');
 const {
     simple
-} = require("./lib/myfunc");
+} = require("./lib/myfunc"); 
 global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
 const fs = require("fs");
 const os = require('os');
@@ -16,7 +17,7 @@ const chalk = require('chalk');
 const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
 
-const extendWASocket = require('./lib/matrixUtils');
+const extendWASocket = require('./lib/matrixUtils'); 
 
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
@@ -35,7 +36,7 @@ const readmore = String.fromCharCode(8206).repeat(4001);
 const { File } = require('megajs');
 const PhoneNumber = require("awesome-phonenumber");
 const readline = require("readline");
-const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc")
+const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc") 
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
 const { toAudio, toPTT, toVideo } = require('./lib/converter')
 const FileType = require('file-type')
@@ -70,7 +71,6 @@ const pluginManager = new PluginManager(path.resolve(__dirname, './src/Plugins')
 
 const ownernumber = "233593734312"; // or load from config/env
 
-
 // Database
 const dbName = "Matrix-db";
 const dbPath = `${ownernumber}.json`;
@@ -78,66 +78,38 @@ const localDb = path.join(__dirname, "src", "database.json");
 
 global.db = new Low(new JSONFile(localDb));
 
-global.loadDatabase = async function loadDatabase() {
-    if (global.db.READ) return new Promise(resolve => setInterval(() => {
-        if (!global.db.READ) {
-            clearInterval(this);
-            resolve(global.db.data ?? global.loadDatabase());
-        }
-    }, 1000));
-
-    if (global.db.data !== null) return;
-
-    global.db.READ = true;
-
+// --- Define global.writeDB at top level to fix ReferenceError ---
+global.writeDB = async function () {
+    if (!global.dbToken) return;
     try {
-        await global.db.read();
+        await global.db.write();
 
-        if (!global.db.data || Object.keys(global.db.data).length === 0) {
-            console.log("[ADIZATU] Syncing local database...");
-            await readDB(); // Ensure this `readDB` populates `global.db.data` correctly
-            await global.db.read(); // Read again after potential sync
+        const octokit = await getOctokit();
+        const owner = await getOwner(octokit);
+        const content = fs.readFileSync(localDb, "utf-8");
+        let sha;
+
+        try {
+            const { data } = await octokit.repos.getContent({ owner, repo: dbName, path: dbPath });
+            sha = data.sha;
+        } catch (error) {
+            if (error.status !== 404) throw error;
         }
 
+        await octokit.repos.createOrUpdateFileContents({
+            owner,
+            repo: dbName,
+            path: dbPath,
+            message: `Updated database`,
+            content: Buffer.from(content).toString("base64"),
+            sha,
+        });
+
+        console.log("[MATRIX-X] Successfully synced database.");
     } catch (error) {
-        console.error("❌ Error loading database:", error);
+        console.error("❌ Error writing database to GitHub:", error);
     }
-
-    global.db.READ = false;
-
-    global.db.data ??= {}; // Ensure it's an object if null
-
-    global.db.data = {
-      chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
-      users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
-      settings: global.db.data.settings && Object.keys(global.db.data.settings).length ? global.db.data.settings : {
-
-        autobio: false,
-        anticall: false,
-        autotype: false,
-        autoread: false,
-        welcome: false,
-        antiedit: "private",
-        menustyle: "2",
-        autoreact: false,
-        statusemoji: "🧡",
-        autorecord: false,
-        antidelete: "private",
-        alwaysonline: false,
-        autoviewstatus: false,
-        autoreactstatus: false,
-        autorecordtype: false
-      },
-      blacklist: global.db.data.blacklist && Object.keys(global.db.data.blacklist).length ? global.db.data.blacklist : {
-        blacklisted_numbers: []
-      },
-      sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
-      premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
 };
-    global.db.chain = _.chain(global.db.data);
-    await global.db.write();
-};
-
 
 // GitHub Functions
 async function getOctokit() {
@@ -204,11 +176,9 @@ async function readDB() {
 
             global.db.data = {
                 chats: previousData.chats || {},
-                users: previousData.users || {}, // Ensure users is initialized
                 settings: { ...defaultSettings, ...(previousData.settings || {}) },
                 blacklist: previousData.blacklist || { blacklisted_numbers: [] },
-                sudo: Array.isArray(previousData.sudo) ? previousData.sudo : [],
-                premium: Array.isArray(previousData.premium) ? previousData.premium : []
+                sudo: Array.isArray(previousData.sudo) ? previousData.sudo : []
             };
 
             global.db.chain = _.chain(global.db.data);
@@ -219,49 +189,78 @@ async function readDB() {
         } catch (error) {
             if (error.status === 404) {
                 console.log("[MATRIX-X] Creating database....");
-                await writeDB();
+                await global.writeDB();
             } else {
                 console.error("❌ Error reading database from GitHub:", error);
             }
         }
-
-        global.writeDB = async function () {
-            if (!global.dbToken) return;
-            try {
-                await global.db.write();
-
-                const octokit = await getOctokit();
-                const owner = await getOwner(octokit);
-                const content = fs.readFileSync(localDb, "utf-8");
-                let sha;
-
-                try {
-                    const { data } = await octokit.repos.getContent({ owner, repo: dbName, path: dbPath });
-                    sha = data.sha;
-                } catch (error) {
-                    if (error.status !== 404) throw error;
-                }
-
-                await octokit.repos.createOrUpdateFileContents({
-                    owner,
-                    repo: dbName,
-                    path: dbPath,
-                    message: `Updated database`,
-                    content: Buffer.from(content).toString("base64"),
-                    sha,
-                });
-
-                console.log("[MATRIX-X] Successfully synced database.");
-            } catch (error) {
-                console.error("❌ Error writing database to GitHub:", error);
-            }
-        };
-
     } catch (error) {
         console.error("❌ Error in readDB:", error);
     }
 }
 
+global.loadDatabase = async function loadDatabase() {
+    if (global.db.READ) return new Promise(resolve => setInterval(() => {
+        if (!global.db.READ) {
+            clearInterval(this);
+            resolve(global.db.data ?? global.loadDatabase());
+        }
+    }, 1000));
+
+    if (global.db.data !== null) return;
+
+    global.db.READ = true;
+
+    try {
+        await global.db.read();
+
+        if (!global.db.data || Object.keys(global.db.data).length === 0) {
+            console.log("[ADIZATU] Syncing local database...");
+            await readDB(); // Ensure this `readDB` populates `global.db.data` correctly
+            await global.db.read(); // Read again after potential sync
+        }
+
+    } catch (error) {
+        console.error("❌ Error loading database:", error);
+    }
+
+    global.db.READ = false;
+
+    global.db.data ??= {}; // Ensure it's an object if null
+    
+    // --- START MODIFICATION ---
+    global.db.data = {
+      chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
+      users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
+      settings: global.db.data.settings && Object.keys(global.db.data.settings).length ? global.db.data.settings : {
+    
+        autobio: false,
+        anticall: false,
+        autotype: false,
+        autoread: false,
+        welcome: false,
+        antiedit: "private",
+        menustyle: "2",
+        autoreact: false,
+        statusemoji: "🧡",
+        autorecord: false,
+        antidelete: "private",
+        alwaysonline: false,
+        autoviewstatus: false,
+        autoreactstatus: false,
+        autorecordtype: false
+      },
+      blacklist: global.db.data.blacklist && Object.keys(global.db.data.blacklist).length ? global.db.data.blacklist : {
+        blacklisted_numbers: []
+      },
+      sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
+      premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
+};
+    // --- END MODIFICATION ---
+
+    global.db.chain = _.chain(global.db.data);
+    await global.db.write();
+};
 
 (async () => {
     if (global.dbToken) {
@@ -280,24 +279,25 @@ async function readDB() {
     global.settings = global.db.data.settings;
     global.modeStatus = global.settings.mode === "public" ? "Public" : global.settings.mode === "private" ? "Private" : global.settings.mode === "group" ? "Group Only" : global.settings.mode === "pm" ? "PM Only" : "Unknown";
 
-//sudo//
-  global.db.data.settings.sudo = global.db.data.settings.sudo || [
-  ...(Array.isArray(global.sudo) ? global.sudo : [])
-    .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
-];
-await global.db.write();
+    //sudo//
+    global.db.data.settings.sudo = global.db.data.settings.sudo || [
+        ...(Array.isArray(global.sudo) ? global.sudo : [])
+        .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
+    ];
+    await global.db.write();
 
     // ...rest of your startup logic (startMatrix, etc)...
 })();
 
-
 if (global.dbToken) {
-    setInterval(writeDB, 30 * 60 * 1000);
+    setInterval(global.writeDB, 30 * 60 * 1000);
 }
 
 if (global.db) setInterval(async () => {
     if (global.db.data) await global.db.write();
 }, 30 * 1000);
+
+// ... rest of your index.js code ...
 
 let phoneNumber = "233593734312"
 const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code")
@@ -465,18 +465,18 @@ async function startMatrix() {
     msgRetryCounterCache,
     defaultQueryTimeoutMs: undefined,
   });
-
-
+  
+  
   global.mainMatrix = Matrix;
-
-  require('./lib/premiumSystem');
+  
+  require('./lib/premiumSystem'); 
 
   // Extend the Matrix object with your custom utilities
   extendWASocket(Matrix);
 
   // Presence update event listener — track who is online/offline
   Matrix.ev.on('presence.update', ({ id, presences }) => {
-
+  
     if (!store.presences) store.presences = {};
     if (!store.presences[id]) store.presences[id] = {};
 
@@ -491,7 +491,7 @@ async function startMatrix() {
     }
   });
 
-
+  
   setInterval(() => {
   }, 10000);
   // --- END ADDED DEBUG LOG ---
@@ -510,7 +510,7 @@ async function startMatrix() {
     }, 3000);
   }
 
-
+  
 
 Matrix.ev.on('connection.update', async (update) => {
 	const {
@@ -574,20 +574,20 @@ await Matrix.sendMessage(Matrix.user.id, {
     "╭༺◈👸🌹𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔🌹👸\n" +
     "│📌 » *Username*: " + Matrix.user.name + "\n" +
     "│💻 » *Platform*: " + os.platform() + "\n" +
-    "│⚡ » *Global Fallback Prefix*: [ . ]\n" +
+    "│⚡ » *Global Fallback Prefix*: [ . ]\n" + 
     "│🚀 » *Global Fallback Mode*: Public\n" +
     "│🤖 » *Version*: [ " + versions + " ]\n" +
     "╰───━━━༺◈༻━━━───╯\n\n" + // Main bot info block
 
     "╭༺◈👑 *𝗕𝗢𝗧 𝗦𝗧𝗔𝗧𝗨𝗦* 👑◈༻╮\n" +
     `│🕒 *Uptime*: ${runtime(process.uptime())}\n` +
-    "╰───━━━༺◈༻━━━───╯\n\n" +
+    "╰───━━━༺◈༻━━━───╯\n\n" + 
 
-
+    
     "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" +
-    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMMYYYY')}\n` +
-    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` +
-    `╰───━━━༺◈༻━━━───╯\n`
+    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMM YYYY')}\n` +
+    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` + 
+    `╰───━━━༺◈༻━━━───╯\n` 
 
 }, {
   ephemeralExpiration: 1800
@@ -721,9 +721,9 @@ Matrix.ev.on('messages.upsert', async (chatUpdate) => {
       if (
         msg.key.id.startsWith('BAE5') ||
         (msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (!msg.key.id.startsWith('3EBO') && msg.key.id.length !== 22 && msg.key.id.length !== 32 && msg.key.id.length !== 20)
+        (!msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
+        (msg.key.id.length !== 32 && msg.key.id.length !== 20)
       ) continue;
-
 
       // Avoid processing duplicates
       if (processedMessages.has(messageId)) continue;
