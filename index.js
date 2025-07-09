@@ -245,6 +245,31 @@ global.writeDB = async function () {
 
     // --- NEW: Require premiumSystem HERE, after DB is loaded ---
     require('./lib/premiumSystem');
+    
+        // --- RENTBOT AUTO-START: Ensures rentbot sessions come online on restart ---
+    const rentbot = require('./rentbot'); // Make sure the path is correct
+    if (global.db && global.db.data && Array.isArray(global.db.data.premium)) {
+        const rentbotUsers = global.db.data.premium.filter(u => u.jid);
+        console.log(`[RENTPOT] Found ${rentbotUsers.length} premium users to start rentbots for.`);
+        for (const user of rentbotUsers) {
+            try {
+                // Ensure rentbot.js exports 'startpairing' as a function
+                if (typeof rentbot.startpairing === 'function') {
+                    await rentbot.startpairing(user.jid); // Use await here
+                    console.log(`[RENTPOT] Successfully initiated rentbot for premium user: ${user.jid}`);
+                } else {
+                    console.error(`[RENTPOT] Error: 'startpairing' function not exported from rentbot.js, cannot start rentbot for ${user.jid}.`);
+                }
+            } catch (err) {
+                console.error(`[RENTPOT] Failed to start rentbot for ${user.jid}:`, err);
+            }
+        }
+    } else {
+        console.warn("[RENTPOT] No premium user data found to start rentbots. Ensure global.db is loaded correctly.");
+    }
+    // --- END RENTBOT AUTO-START BLOCK ---
+
+    
 
     Object.defineProperty(global, "mode", {
       get() { return global.db.data.settings.mode || "public" },
