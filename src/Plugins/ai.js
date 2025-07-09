@@ -2,6 +2,7 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
+const { isPremium } = require('../../lib/premiumsystem');
 const { fromBuffer } = require('file-type');
 const path = require('path');
 
@@ -34,7 +35,7 @@ module.exports =  [
       }
     });
 
-    // If no argument is provided, show usage, image, and model list, then RETURN!
+    // Show usage/help to everyone
     if (!text) {
       const modelEmojis = {
         gemini: "🌈", gpt3: "🤖", llama3: "🦙", evilgpt: "😈", jarvis: "🧑‍💼",
@@ -73,8 +74,12 @@ ${modelList}
         caption: usage
       }, { quoted: m });
 
-      // RETURN here so nothing else is sent!
       return;
+    }
+
+    // Restrict toggling to creator or premium users only
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can enable or disable Adiza Chat. Contact the owner to purchase premium.");
     }
 
     // If text is provided, treat it as on/off toggle
@@ -95,52 +100,65 @@ ${modelList}
   }
 },
 
+ 
 {
-    command: ["jarvis"],
-    operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
-      const userState = getUserApiState(sender);
+  command: ["jarvis"],
+  operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
 
-      await Matrix.sendMessage(m.chat, {
-        react: {
-          text: "🤖",
-          key: m.key
-        }
-      });
+    const userState = getUserApiState(sender);
 
-      if (!text) {
-        if (!userState.enabled) {
-            userState.enabled = true;
-            userState.currentApi = "jarvis";
-            userState.isSelecting = false;
-            saveAdizaUserStates();
-            return reply(`✅ Jarvis AI *enabled* for you. You can now chat directly without a prefix. Type \`${prefix}adizachat off\` to disable or \`${prefix}adizachat on\` to switch models.`);
-        } else if (userState.enabled && userState.currentApi !== "jarvis") {
-            userState.currentApi = "jarvis";
-            userState.isSelecting = false;
-            saveAdizaUserStates();
-            return reply(`✅ Switched to *Jarvis AI*. You can now chat directly without a prefix.`);
-        } else {
-            return reply(`*Jarvis AI* is already active for you. Just type your message directly.`);
-        }
+    await Matrix.sendMessage(m.chat, {
+      react: {
+        text: "🤖",
+        key: m.key
       }
+    });
 
-      // If text is provided, and Jarvis is the active model, confirm that direct chat is enabled.
-      if (userState.enabled && userState.currentApi === "jarvis") {
-          return reply("Jarvis AI is active. Your query will be processed directly in the next message.");
+    if (!text) {
+      if (!userState.enabled) {
+        userState.enabled = true;
+        userState.currentApi = "jarvis";
+        userState.isSelecting = false;
+        saveAdizaUserStates();
+        return reply(`✅ Jarvis AI *enabled* for you. You can now chat directly without a prefix. Type \`${prefix}adizachat off\` to disable or \`${prefix}adizachat on\` to switch models.`);
+      } else if (userState.enabled && userState.currentApi !== "jarvis") {
+        userState.currentApi = "jarvis";
+        userState.isSelecting = false;
+        saveAdizaUserStates();
+        return reply(`✅ Switched to *Jarvis AI*. You can now chat directly without a prefix.`);
       } else {
-          if (!userState.enabled) {
-              return reply(`Please enable Adizachat first and select Jarvis: \`${prefix}adizachat on\`, then type \`jarvis\`.`);
-          } else {
-              return reply(`Jarvis is not your active AI. Your current AI is *${AVAILABLE_APIS[userState.currentApi]?.displayName}*. Type \`${prefix}jarvis\` to switch to it.`);
-          }
+        return reply(`*Jarvis AI* is already active for you. Just type your message directly.`);
       }
     }
-  },
+
+    // If text is provided, and Jarvis is the active model, confirm that direct chat is enabled.
+    if (userState.enabled && userState.currentApi === "jarvis") {
+      return reply("Jarvis AI is active. Your query will be processed directly in the next message.");
+    } else {
+      if (!userState.enabled) {
+        return reply(`Please enable Adizachat first and select Jarvis: \`${prefix}adizachat on\`, then type \`jarvis\`.`);
+      } else {
+        return reply(`Jarvis is not your active AI. Your current AI is *${AVAILABLE_APIS[userState.currentApi]?.displayName}*. Type \`${prefix}jarvis\` to switch to it.`);
+      }
+    }
+  }
+},
 
   // --- BLACKBOX AI Command ---
   {
     command: ["blackbox"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -183,6 +201,13 @@ ${modelList}
   {
     command: ["perplexity"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -225,6 +250,13 @@ ${modelList}
   {
     command: ["gemini"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -273,6 +305,13 @@ ${modelList}
   {
     command: ["generate"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -315,6 +354,13 @@ ${modelList}
   {
     command: ["dbrx"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -357,6 +403,14 @@ ${modelList}
   {
     command: ["chatgpt"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -399,6 +453,13 @@ ${modelList}
   {
     command: ["deepseekllm"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -441,6 +502,12 @@ ${modelList}
   {
     command: ["doppleai"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }    
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -483,6 +550,13 @@ ${modelList}
   {
     command: ["gpt"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+       
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -525,6 +599,13 @@ ${modelList}
   {
     command: ["gpt2"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -567,6 +648,13 @@ ${modelList}
   {
     command: ["imagen"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+   
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -609,6 +697,13 @@ ${modelList}
   {
     command: ["imagine"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -651,6 +746,13 @@ ${modelList}
   {
     command: ["islamicai"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -693,6 +795,13 @@ ${modelList}
   {
     command: ["letterai"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -735,6 +844,12 @@ ${modelList}
   {
     command: ["llama"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -777,6 +892,13 @@ ${modelList}
   {
     command: ["metaai"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -819,6 +941,12 @@ ${modelList}
   {
     command: ["mistral"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -861,6 +989,13 @@ ${modelList}
   {
     command: ["openai"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -903,6 +1038,13 @@ ${modelList}
   {
     command: ["photoai"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -944,6 +1086,12 @@ ${modelList}
   {
     command: ["evilgpt"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
@@ -987,6 +1135,13 @@ ${modelList}
   {
     command: ["anime4k"],
     operate: async ({ Matrix, m, reply, text, prefix, sender, getUserApiState, saveAdizaUserStates, AVAILABLE_APIS }) => {
+    
+    // Restrict to creator or premium users
+    if (!m.isCreator && !isPremium(sender)) {
+      return reply("❌ Only premium users or the owner can use Jarvis AI. Contact the owner to purchase premium.");
+    }
+
+    
       const userState = getUserApiState(sender);
 
       await Matrix.sendMessage(m.chat, {
