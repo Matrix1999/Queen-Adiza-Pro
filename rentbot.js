@@ -467,7 +467,7 @@ async function startpairing(MatrixNumber) {
        if (global.dbToken) {
     setInterval(() => {
                 uploadPairingSessions().catch(console.error);
-            }, 15 * 60 * 1000); // every 15 minutes
+            }, 5 * 60 * 1000); // every 5 minutes
         }
 
     } catch (err) {
