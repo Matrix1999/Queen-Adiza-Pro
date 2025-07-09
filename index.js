@@ -293,9 +293,11 @@ async function readDB() {
     ];
     await global.db.write();
 
-    // Now, after global.db.data and its properties are initialized, require premiumSystem.js
-    // This ensures that when premiumSystem.js runs, global.db.data.premium exists.
+    // *******************************************************************
+    // IMPORTANT: Require premiumSystem.js *AFTER* global.loadDatabase()
+    // This ensures global.db.data.premium is initialized.
     require('./lib/premiumSystem');
+    // *******************************************************************
 
     // ...rest of your startup logic (startMatrix, etc)...
 })();
@@ -489,7 +491,7 @@ async function startMatrix() {
     if (!store.presences[id]) store.presences[id] = {};
 
     if (presences) {
-      for (const [userJid, presenceInfo] of Object.entries(presences)) {
+      for (const [userJid, presenceInfo] = Object.entries(presences)) {
         if (presenceInfo.lastKnownPresence === 'available') {
           store.presences[id][userJid] = true;
         } else {
@@ -1316,7 +1318,9 @@ async function startAdiza() {
             return AdizaBotInc.reply(`You are not authorized to use this command.\nPlease dm ${OWNER_NAME} for buy.`);
         }
         try {
-            const adminList = premiumUsers.length > 0 ? premiumUsers.join('\n') : "No admins found.";
+            // Safely access global.db.data.premium for Telegram premium list
+            const premiumList = global.db.data.premium || [];
+            const adminList = premiumList.length > 0 ? premiumList.map(p => p.jid).join('\n') : "No premium users found.";
             await AdizaBotInc.reply(`👮 Premium List:\n${adminList}`);
         } catch (error) {
             console.error('Error listing admins:', error);
@@ -1330,21 +1334,30 @@ async function startAdiza() {
             return AdizaBotInc.reply(`You are not authorized to use this command.\nPlease dm ${OWNER_NAME} for buy.`);
         }
         const text = AdizaBotInc.message.text.split(' ');
-        if (text.length < 2) {
-            return AdizaBotInc.reply("Please provide the user ID to add as premium user.\nUsage: `/addprem <user_id>`", { parse_mode: "Markdown" });
+        if (text.length < 3) { // Expecting /addprem <user_id> <duration>
+            return AdizaBotInc.reply("Please provide the user ID and duration to add as premium user.\nUsage: `/addprem <user_id> <duration> (e.g., 7d, 30m)`", { parse_mode: "Markdown" });
         }
-        const newAdmin = text[1];
-        if (premiumUsers.includes(newAdmin)) {
-            return AdizaBotInc.reply("This user is already a premium user.");
+        const newPremiumJid = text[1]; // JID or user ID
+        const duration = text[2]; // e.g., "7d", "30m"
+
+        const expiry = calculateExpiry(duration); // Use the function from premiumSystem
+        if (!expiry) {
+            return AdizaBotInc.reply("Invalid duration format. Examples: `7d` (7 days), `30m` (30 minutes), `1h` (1 hour), `1mo` (1 month).");
         }
-        try {
-            premiumUsers.push(newAdmin);
-            fs.writeFileSync(premium_file, JSON.stringify(premiumUsers, null, 2));
-            AdizaBotInc.reply(`✅ User ${newAdmin} added as admin.`);
-        } catch (error) {
-            console.error('Error adding user as premium:', error);
-            AdizaBotInc.reply('Error adding user as premium.');
+
+        let premiumUsersArray = global.db.data.premium || []; // Safely get the array
+        const existingIndex = premiumUsersArray.findIndex(p => p.jid === newPremiumJid);
+
+        if (existingIndex !== -1) {
+            premiumUsersArray[existingIndex].expiry = expiry; // Update expiry if user exists
+            AdizaBotInc.reply(`✅ User ${newPremiumJid} premium updated. New expiry: ${new Date(expiry).toLocaleString()}.`);
+        } else {
+            premiumUsersArray.push({ jid: newPremiumJid, expiry: expiry }); // Add new user
+            AdizaBotInc.reply(`✅ User ${newPremiumJid} added as premium. Expiry: ${new Date(expiry).toLocaleString()}.`);
         }
+
+        global.db.data.premium = premiumUsersArray; // Update the global db object
+        await global.db.write(); // Persist changes
     });
 
     bot.command('delprem', async (AdizaBotInc) => {
@@ -1356,17 +1369,18 @@ async function startAdiza() {
         if (text.length < 2) {
             return AdizaBotInc.reply("Please provide the user ID to remove as premium user.\nUsage: `/delprem <user_id>`", { parse_mode: "Markdown" });
         }
-        const adminToRemove = text[1];
-        if (!premiumUsers.includes(adminToRemove)) {
-            return AdizaBotInc.reply("This user is not a premium user.");
-        }
-        try {
-            premiumUsers = premiumUsers.filter((id) => id !== adminToRemove);
-            fs.writeFileSync(premium_file, JSON.stringify(premiumUsers, null, 2));
-            AdizaBotInc.reply(`✅ User ${adminToRemove} removed from admins.`);
-        } catch (error) {
-            console.error('Error removing premium user:', error);
-            AdizaBotInc.reply('Error removing premium user.');
+        const premiumToRemove = text[1];
+
+        let premiumUsersArray = global.db.data.premium || []; // Safely get the array
+        const initialLength = premiumUsersArray.length;
+        premiumUsersArray = premiumUsersArray.filter((p) => p.jid !== premiumToRemove);
+
+        if (premiumUsersArray.length < initialLength) {
+            global.db.data.premium = premiumUsersArray; // Update the global db object
+            await global.db.write(); // Persist changes
+            AdizaBotInc.reply(`✅ User ${premiumToRemove} removed from premium users.`);
+        } else {
+            AdizaBotInc.reply("This user is not a premium user.");
         }
     });
 
@@ -1383,7 +1397,7 @@ async function startAdiza() {
 
         // Join all parts after the command to form the full broadcast message
         const broadcastMessage = cmdParts.slice(1).join(' ');
-        const allRecipients = Array.from(new Set([...allTelegramUsers, ...premiumUsers])); // Combine all users and premium users, remove duplicates
+        const allRecipients = Array.from(new Set([...allTelegramUsers, ...(global.db.data.premium || []).map(p => p.jid)])); // Combine all users and premium users, remove duplicates
 
         let successCount = 0;
         let failedCount = 0;
