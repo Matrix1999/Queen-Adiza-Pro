@@ -45,8 +45,8 @@ const more = String.fromCharCode(8206);
 const readmore = more.repeat(4001);
 const timestampp = speed();
 const latensi = speed() - timestampp
-const devMatrix = '233593734312';
-const mainOwner = "233593734312@s.whatsapp.net";
+const devMatrix = '233544981163';
+const mainOwner = "233544981163@s.whatsapp.net";
 
 const statusReactionCooldowns = new Map();
 const STATUS_REACTION_COOLDOWN_MS = 10 * 1000;
