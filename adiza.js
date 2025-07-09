@@ -643,8 +643,9 @@ ${prefix + command} doc (Reply to a document)`;
     }
 
     // --- Start the WhatsApp pairing process ---
-    const startpairing = require('./rentbot.js');
-    await startpairing(Xreturn);
+    const rentbot = require('./rentbot.js');
+   await rentbot.startpairing(Xreturn);
+
 
     // --- Wait for the pairing.json to be created in the user's session folder (up to 20 seconds) ---
     const pairingFilePath = path.join(pairingBaseDir, 'pairing.json');
