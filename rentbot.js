@@ -186,6 +186,7 @@ async function uploadPairingSessions() {
                     continue;
                 }
 
+                // --- SHA conflict-safe upload ---
                 let sha;
                 try {
                     const { data } = await pairingOctokit.repos.getContent({
@@ -196,16 +197,43 @@ async function uploadPairingSessions() {
                     sha = data.sha;
                 } catch (err) {
                     if (err.status !== 404) throw err;
+                    sha = undefined; // File does not exist yet
                 }
 
-                await pairingOctokit.repos.createOrUpdateFileContents({
-                    owner: GITHUB_PAIRING_OWNER,
-                    repo: GITHUB_PAIRING_REPO,
-                    path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
-                    message: `Update pairing session for ${userDir}/${fileName}`,
-                    content: Buffer.from(content).toString("base64"),
-                    sha,
-                });
+                try {
+                    await pairingOctokit.repos.createOrUpdateFileContents({
+                        owner: GITHUB_PAIRING_OWNER,
+                        repo: GITHUB_PAIRING_REPO,
+                        path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
+                        message: `Update pairing session for ${userDir}/${fileName}`,
+                        content: Buffer.from(content).toString("base64"),
+                        sha,
+                    });
+                } catch (err) {
+                    if (err.status === 409) {
+                        // SHA conflict, fetch latest SHA and retry
+                        try {
+                            const { data } = await pairingOctokit.repos.getContent({
+                                owner: GITHUB_PAIRING_OWNER,
+                                repo: GITHUB_PAIRING_REPO,
+                                path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
+                            });
+                            await pairingOctokit.repos.createOrUpdateFileContents({
+                                owner: GITHUB_PAIRING_OWNER,
+                                repo: GITHUB_PAIRING_REPO,
+                                path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
+                                message: `Retry update pairing session for ${userDir}/${fileName}`,
+                                content: Buffer.from(content).toString("base64"),
+                                sha: data.sha,
+                            });
+                            console.warn(`[RENTPOT] 409 conflict resolved for ${fileName}, upload retried.`);
+                        } catch (retryErr) {
+                            console.error(`[RENTPOT] Failed to resolve 409 conflict for ${fileName}:`, retryErr);
+                        }
+                    } else {
+                        console.error(`[RENTPOT] Failed to upload file ${fileName}:`, err);
+                    }
+                }
             }
         }
         console.log("[RENTPOT] Pairing sessions synced to GitHub.");
@@ -213,7 +241,6 @@ async function uploadPairingSessions() {
         console.error("[RENTPOT] Failed to sync pairing sessions to GitHub:", error);
     }
 }
-
 
 // --- GITHUB SYNC ADDITIONS END ---
 
