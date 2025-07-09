@@ -7,9 +7,8 @@ const fetch = require('node-fetch');
 const AdmZip = require("adm-zip");
 const axios = require("axios");
 const { sleep } = require('../../lib/myfunc');
-const chalk = require('chalk');
+
 const { formatDateTime } = require('../../lib/myfunc');
-const startpairing = require('../../rentbot.js'); 
 const { promisify } = require('util');
 const { calculateExpiry, isPremium } = require('../../lib/premiumSystem');
 const moment = require('moment-timezone');
@@ -1752,7 +1751,6 @@ ${requestMsg}
     reply(mess.done);
  }
 },   
- 
 {
   command: ['addprem'],
   operate: async ({ Matrix, m, isCreator, mess, prefix, args, reply, db }) => {
@@ -1778,19 +1776,18 @@ ${requestMsg}
     let durationString = args[1] || '31d'; // Default 31 days
 
     // Calculate expiry timestamp
-    // Assuming calculateExpiry is either global or imported
-    const expiryTimestamp = calculateExpiry(durationString); // ensure calculateExpiry is accessible
+    const expiryTimestamp = calculateExpiry(durationString);
     if (expiryTimestamp === null) {
       return reply('❌ Invalid duration format! Use e.g. 60d, 24h, 30m, 10s.');
     }
 
-    const expirationDate = moment(expiryTimestamp).tz('Africa/Accra').format('dddd, MMMM Do YYYY, HH:mm:ss'); // Fixed DoYYYY
+    const expirationDate = moment(expiryTimestamp).tz('Africa/Accra').format('dddd, MMMM Do YYYY, HH:mm:ss');
 
     let premiumUsers = db.data.premium || [];
     let existingUserIndex = premiumUsers.findIndex(p => p.jid === targetJid);
 
     let username = targetJid.split('@')[0];
-    const activatedDate = moment().tz('Africa/Accra').format('dddd, MMMM Do YYYY, HH:mm:ss'); // Fixed DoYYYY
+    const activatedDate = moment().tz('Africa/Accra').format('dddd, MMMM Do YYYY, HH:mm:ss');
 
     if (existingUserIndex !== -1) {
       premiumUsers[existingUserIndex].expiry = expiryTimestamp;
@@ -1819,9 +1816,7 @@ ${requestMsg}
     const sessionPath = path.join(__dirname, '..', '..', 'lib', 'pairing', targetJid);
     const credsFile = path.join(sessionPath, 'creds.json');
     const pairingFile = path.join(sessionPath, 'pairing.json');
-
-    // MODIFIED: Check for the new object structure and then the sock property
-    const isSocketActive = global.activeSockets && global.activeSockets[targetJid] && global.activeSockets[targetJid].sock;
+    const isSocketActive = global.activeSockets && global.activeSockets[targetJid];
 
     if (fs.existsSync(credsFile) && typeof startpairing === 'function' && !isSocketActive) {
       // Session exists but is not active, recover it (no new code needed)
@@ -1843,7 +1838,6 @@ ${requestMsg}
     // --- Send premium activation DM with thumbnail ---
     let premiumThumbnailBuffer = null;
     try {
-      // Use fetch directly for consistency, assuming node-fetch is available.
       const thumbnailResponse = await fetch("https://files.catbox.moe/sgmydn.jpeg");
       if (thumbnailResponse.ok) {
         premiumThumbnailBuffer = await thumbnailResponse.buffer();
@@ -1863,10 +1857,7 @@ ${requestMsg}
       `🌹 Enjoy all premium features! If you have any questions, feel free to contact support.`;
 
     try {
-      
-      const senderSocket = isSocketActive ? global.activeSockets[targetJid].sock : Matrix;
-
-      await senderSocket.sendMessage(targetJid, {
+      await Matrix.sendMessage(targetJid, {
         text: messageToUser,
         mentions: [targetJid],
         contextInfo: {
@@ -1916,44 +1907,27 @@ ${requestMsg}
     console.log(`[DELPREM DEBUG] Active sockets before:`, Object.keys(global.activeSockets));
 
     // 3. Try to close the user's active socket if it exists
-    // MODIFIED: Access the object, then its 'sock' and 'keepAliveIntervalId'
     if (global.activeSockets && global.activeSockets[numberToRemove]) {
-      const socketInfo = global.activeSockets[numberToRemove];
       try {
         console.log(`[DELPREM DEBUG] Attempting to close socket for ${numberToRemove}...`);
-        
-        // Clear the keepAliveInterval for this specific socket
-        if (socketInfo.keepAliveIntervalId) {
-            clearInterval(socketInfo.keepAliveIntervalId);
-            console.log(chalk.magenta(`[DELPREM] Cleared keepAliveInterval for ${numberToRemove}.`));
-        }
-
-        // End the socket connection
-        if (socketInfo.sock) {
-            await socketInfo.sock.end();
-            // No need for setTimeout here; .end() is typically async or triggers an event.
-            // Rely on the connection.update 'close' event in rentbot.js to remove from global.activeSockets.
-            console.log(`[DELPREM] Initiated closing of active socket for ${numberToRemove}.`);
-        } else {
-             console.log(`[DELPREM DEBUG] Socket object (sock) not found for ${numberToRemove}.`);
-        }
-
-
+        await global.activeSockets[numberToRemove].end();
+        await new Promise(res => setTimeout(res, 500));
+        delete global.activeSockets[numberToRemove];
+        console.log(`[DELPREM] Closed and removed active socket for ${numberToRemove}`);
       } catch (e) {
-        console.error(`[DELPREM] Failed to clear interval or close socket for ${numberToRemove}:`, e);
+        console.error(`[DELPREM] Failed to close socket for ${numberToRemove}:`, e);
       }
     } else {
       console.log(`[DELPREM DEBUG] No active socket found for ${numberToRemove}.`);
     }
 
-    // 4. Show all active sockets after removal (this will reflect changes once rentbot.js processes close)
+    // 4. Show all active sockets after removal
     console.log(`[DELPREM DEBUG] Active sockets after:`, Object.keys(global.activeSockets));
 
     // 5. DO NOT delete any session files. User's WhatsApp session remains linked!
 
     // 6. Notify user
     try {
-      // MODIFIED: Use the owner's Matrix to send the message, as the user's socket is now closed or closing.
       await Matrix.sendMessage(numberToRemove, {
         text: `❌ Your premium status has been revoked. Your WhatsApp remains linked, so you can instantly regain access if you renew your premium.`
       });
@@ -1961,7 +1935,7 @@ ${requestMsg}
       console.warn(`[DELPREM] Could not notify user ${numberToRemove} about premium removal: ${err.message}`);
     }
   }
-}, {
+},  {
   command: ['activesockets'],
   operate: async ({ Matrix, m, isCreator, reply }) => {
     if (!isCreator) return reply("❌ Only the owner can use this command.");
@@ -1977,323 +1951,19 @@ ${requestMsg}
 
     socketJids.forEach((jid, i) => {
       let state = "Unknown";
-      let userInfo = "N/A";
-      let keepAliveStatus = "N/A";
-
+      let username = "Unknown";
+      let alive = "🔴 Dead";
       try {
-        const socketEntry = sockets[jid];
-        if (socketEntry && socketEntry.sock) {
-          state = socketEntry.sock.user ? "Connected" : "Disconnected";
-          userInfo = socketEntry.sock.user ? `Name: ${socketEntry.sock.user.name || 'N/A'}` : 'N/A';
-          // Check if keepAliveIntervalId is set, implying an active interval
-          keepAliveStatus = socketEntry.keepAliveIntervalId ? "Active" : "Inactive/Cleared";
-        }
-      } catch (e) {
-        console.error(`Error checking socket status for ${jid}:`, e);
-      }
-      msg += `${i + 1}. *${jid}*\n   • Status: *${state}*\n   • Info: ${userInfo}\n   • Keep-Alive: *${keepAliveStatus}*\n   • To disconnect: _${m.prefix || '/'}disconnectsocket ${jid}_\n\n`;
+        state = sockets[jid].user ? "Connected" : "Disconnected";
+        username = sockets[jid].user?.name || sockets[jid].user?.pushName || "Unknown";
+        alive = sockets[jid].user ? "🟢 Alive" : "🔴 Dead";
+      } catch (e) {}
+      msg += `${i + 1}. *${jid}*\n   • Username: *${username}*\n   • Status: *${state}*\n   • Alive: ${alive}\n\n`;
     });
 
     await Matrix.sendMessage(m.chat, { text: msg }, { quoted: m });
   }
 },
-
-{
-  command: ['disconnectsocket'],
-  operate: async ({ Matrix, m, isCreator, args, reply }) => {
-    if (!isCreator) return reply("❌ Only the owner can use this command.");
-    if (!args[0]) return reply("❗ Usage: /disconnectsocket <jid>");
-
-    let jid = args[0].trim();
-    // --- FIX START: Ensure JID always has @s.whatsapp.net suffix ---
-    if (!jid.endsWith('@s.whatsapp.net')) {
-        jid = jid.includes('@') ? jid : `${jid}@s.whatsapp.net`;
-    }
-    // --- FIX END ---
-
-    // Check if the JID is currently active
-    if (global.activeSockets && global.activeSockets[jid]) {
-      const socketInfo = global.activeSockets[jid];
-      try {
-        // Clear the keepAliveInterval for this specific socket
-        if (socketInfo.keepAliveIntervalId) {
-            clearInterval(socketInfo.keepAliveIntervalId);
-            console.log(chalk.magenta(`[DISCONNECT] Cleared keepAliveInterval for ${jid}.`));
-        }
-
-        // End the socket connection
-        if (socketInfo.sock) {
-            await socketInfo.sock.end(); // This will trigger the 'close' event in rentbot.js
-            console.log(chalk.cyan(`[DISCONNECT] Initiated closing of active socket for ${jid}.`));
-        } else {
-             console.log(chalk.red(`[DISCONNECT] Socket object (sock) not found for ${jid}.`));
-        }
-
-        // Mark JID as manually disconnected in runtime Set and persistent DB
-        if (global.manuallyDisconnected) {
-            if (!global.manuallyDisconnected.has(jid)) { // Only add if not already present
-                global.manuallyDisconnected.add(jid);
-                // Also add to your persistent database array
-                if (global.db && global.db.data && Array.isArray(global.db.data.manualDisconnects)) {
-                    global.db.data.manualDisconnects.push(jid);
-                    await global.db.write(); // Save the database after modification
-                    console.log(chalk.yellow(`[DISCONNECT] Added ${jid} to manuallyDisconnected list (persistent).`));
-                } else {
-                    console.warn(chalk.yellow(`[DISCONNECT] Could not save ${jid} to persistent database (manualDisconnects array not found or not an array).`));
-                }
-            } else {
-                console.log(chalk.blue(`[DISCONNECT] ${jid} was already in manuallyDisconnected list (runtime).`));
-            }
-        } else {
-            console.error(chalk.red(`[DISCONNECT] global.manuallyDisconnected is not defined! This indicates rentbot.js might not be correctly initialized.`));
-        }
-        
-        reply(`✅ Initiated disconnection and cleanup for socket *${jid}*. It will no longer auto-reconnect.`);
-      } catch (e) {
-        reply(`❌ Failed to disconnect *${jid}*: ${e.message}`);
-        console.error(`[DISCONNECT] Error disconnecting socket for ${jid}:`, e);
-      }
-    } else {
-      // If no active socket, still mark as manually disconnected if it's not already, for future prevention
-      if (global.manuallyDisconnected && !global.manuallyDisconnected.has(jid)) {
-          global.manuallyDisconnected.add(jid);
-          if (global.db && global.db.data && Array.isArray(global.db.data.manualDisconnects)) {
-              global.db.data.manualDisconnects.push(jid);
-              await global.db.write();
-              reply(`⚠️ No active socket found for *${jid}*, but marked as manually disconnected for future prevention.`);
-              console.log(chalk.yellow(`[DISCONNECT] No active socket for ${jid}, but added to manuallyDisconnected list (persistent).`));
-          } else {
-              reply(`⚠️ No active socket found for *${jid}*. (Persistent DB not available for manual disconnect)`);
-              console.warn(chalk.yellow(`[DISCONNECT] No active socket for ${jid}, and could not save to persistent DB.`));
-          }
-      } else {
-          reply(`⚠️ No active socket found for *${jid}*. It's already marked as manually disconnected.`);
-      }
-    }
-  }
-},
-
-{
-  command: ['reconnectsocket'],
-  operate: async ({ Matrix, m, isCreator, args, reply }) => {
-    if (!isCreator) return reply("❌ Only the owner can use this command.");
-    if (!args[0]) return reply("❗ Usage: .reconnectsocket 233509539410@s.whatsapp.net");
-
-    const jid = args[0].trim();
-
-    // Ensure global.db.data and manualDisconnects are accessible
-    if (!global.db || !global.db.data || !Array.isArray(global.db.data.manualDisconnects)) {
-        console.error(chalk.red("[RECONNECT] Database or manualDisconnects array not properly initialized."));
-        return reply("❌ Bot database not fully loaded or corrupted. Please restart the bot.");
-    }
-
-    // Check if the JID is currently active (already connected)
-    if (global.activeSockets && global.activeSockets[jid]) {
-        return reply(`ℹ️ Socket for *${jid}* is already active and connected.`);
-    }
-
-    // Check if the JID is in the persistent manualDisconnects list from the database
-    const isManuallyDisconnectedInDb = global.db.data.manualDisconnects.includes(jid);
-
-    if (isManuallyDisconnectedInDb) {
-        try {
-            // Remove the JID from the runtime manually disconnected set
-            if (global.manuallyDisconnected && global.manuallyDisconnected.has(jid)) {
-                global.manuallyDisconnected.delete(jid);
-                console.log(chalk.yellow(`[RECONNECT] Removed ${jid} from runtime manuallyDisconnected list.`));
-            }
-
-            // Remove from the persistent database array
-            global.db.data.manualDisconnects = global.db.data.manualDisconnects.filter(id => id !== jid);
-            await global.db.write(); // Save the database after modification
-            console.log(chalk.green(`[RECONNECT] Removed ${jid} from persistent database (manualDisconnects).`));
-
-            // Trigger the startpairing function for this JID
-            await startpairing(jid);
-            console.log(chalk.green(`[RECONNECT] Attempting to reconnect socket for ${jid}.`));
-            reply(`✅ Attempting to reconnect socket for *${jid}*. Please wait a moment.`);
-        } catch (e) {
-            reply(`❌ Failed to initiate reconnection for *${jid}*: ${e.message}`);
-            console.error(`[RECONNECT] Error initiating reconnection for ${jid}:`, e);
-        }
-    } else {
-        // This block now only executes if the JID is NOT in the activeSockets AND NOT in the persistent DB's manualDisconnects
-        reply(`⚠️ Socket for *${jid}* was not found in the explicit manual disconnected list. Attempting to start a new session anyway.`);
-        console.log(chalk.yellow(`[RECONNECT] ${jid} not found in persistent manualDisconnected list. Calling startpairing directly.`));
-        try {
-            await startpairing(jid);
-            reply(`✅ Attempting to start a new session for *${jid}*. Please wait.`);
-        } catch (e) {
-            console.error(`[RECONNECT] Error calling startpairing for ${jid}:`, e);
-            reply(`❌ Error trying to start session for *${jid}*: ${e.message}`);
-        }
-    }
-  }
-},
-{
-  command: ['closeallsockets', 'disconnectall'],
-  operate: async ({ Matrix, m, isCreator, reply }) => {
-    if (!isCreator) return reply("❌ Only the owner can use this command.");
-
-    const socketsToClose = Object.keys(global.activeSockets || {});
-    if (socketsToClose.length === 0) {
-      return reply("No active WhatsApp sockets to close.");
-    }
-
-    let closedCount = 0;
-    let failedCount = 0;
-    let logMessages = [];
-
-    await reply(`Initiating closure of ${socketsToClose.length} active sockets...`);
-
-    for (const jid of socketsToClose) {
-      const socketInfo = global.activeSockets[jid];
-      if (socketInfo && socketInfo.sock) {
-        try {
-          // Clear the keepAliveInterval for this specific socket
-          if (socketInfo.keepAliveIntervalId) {
-            clearInterval(socketInfo.keepAliveIntervalId);
-            logMessages.push(chalk.magenta(`[CLOSE ALL] Cleared keepAliveInterval for ${jid}.`));
-          }
-
-          // End the socket connection
-          await socketInfo.sock.end();
-          closedCount++;
-          logMessages.push(chalk.cyan(`[CLOSE ALL] Closed socket for ${jid}.`));
-
-          // Also mark as manually disconnected to prevent immediate auto-reconnect
-          if (global.manuallyDisconnected) {
-            if (!global.manuallyDisconnected.has(jid)) {
-              global.manuallyDisconnected.add(jid);
-              if (global.db && global.db.data && Array.isArray(global.db.data.manualDisconnects)) {
-                global.db.data.manualDisconnects.push(jid);
-              }
-            }
-          }
-
-        } catch (e) {
-          failedCount++;
-          logMessages.push(chalk.red(`[CLOSE ALL] Failed to close socket for ${jid}: ${e.message}`));
-        }
-      } else {
-        failedCount++;
-        logMessages.push(chalk.yellow(`[CLOSE ALL] No valid socket object found for ${jid}.`));
-      }
-    }
-
-    // Save DB after all operations, if manualDisconnects was modified
-    if (global.db && global.db.data && Array.isArray(global.db.data.manualDisconnects)) {
-      await global.db.write();
-      logMessages.push(chalk.green("[CLOSE ALL] Database updated with manually disconnected users."));
-    }
-
-    const summary = `✅ Closed ${closedCount} active socket(s).\n❌ Failed to close ${failedCount} socket(s).`;
-    console.log(logMessages.join('\n')); // Log detailed messages to console
-    await reply(summary); // Reply with a summary to the user
-  }
-},
-{
-  command: ['relinksockets', 'reconnectall'],
-  operate: async ({ Matrix, m, isCreator, reply }) => {
-    if (!isCreator) return reply("❌ Only the owner can use this command.");
-
-    // Ensure startpairing is available
-    let startpairing;
-    try {
-        startpairing = require('../../rentbot.js'); // Adjust path if needed
-    } catch (e) {
-        console.error("Could not require rentbot.js for reconnection:", e);
-        return reply("❌ Error: rentbot.js not found or could not be loaded. Cannot reconnect sockets.");
-    }
-
-    if (typeof startpairing !== 'function') {
-        return reply("❌ Error: 'startpairing' function not found in rentbot.js. Cannot reconnect sockets.");
-    }
-
-    // Ensure global.db.data and manualDisconnects are accessible
-    if (!global.db || !global.db.data || !Array.isArray(global.db.data.manualDisconnects)) {
-        console.error(chalk.red("[RECONNECT ALL] Database or manualDisconnects array not properly initialized."));
-        return reply("❌ Bot database not fully loaded or corrupted. Please restart the bot.");
-    }
-
-    let reconnectedCount = 0;
-    let alreadyActiveCount = 0;
-    let noCredsCount = 0;
-    let failedToReconnectCount = 0;
-    let logMessages = [];
-
-    // Get all session directories
-    const sessionDir = path.resolve(__dirname, '../../lib/pairing'); // Adjust path as per your structure
-    let sessionJids = [];
-    try {
-        const files = await fsp.readdir(sessionDir);
-        for (const file of files) {
-            const fullPath = path.join(sessionDir, file);
-            const stat = await fsp.stat(fullPath);
-            if (stat.isDirectory()) {
-                // Check if creds.json exists inside
-                if (fs.existsSync(path.join(fullPath, 'creds.json'))) {
-                    sessionJids.push(file); // The directory name is the JID
-                }
-            }
-        }
-    } catch (e) {
-        console.error(`[RECONNECT ALL] Error reading session directory: ${e.message}`);
-        return reply("❌ Failed to read session data. Cannot attempt reconnection.");
-    }
-
-    if (sessionJids.length === 0) {
-      return reply("No user session files found to attempt reconnection.");
-    }
-
-    await reply(`Attempting to reconnect ${sessionJids.length} potential sockets...`);
-
-    for (const jid of sessionJids) {
-        // 1. Check if already active
-        if (global.activeSockets && global.activeSockets[jid]) {
-            alreadyActiveCount++;
-            logMessages.push(chalk.blue(`[RECONNECT ALL] Socket for ${jid} is already active. Skipping.`));
-            continue; // Skip if already connected
-        }
-
-        // 2. Remove from manual disconnect list (runtime and persistent)
-        const isManuallyDisconnectedInDb = global.db.data.manualDisconnects.includes(jid);
-        if (isManuallyDisconnectedInDb) {
-            if (global.manuallyDisconnected && global.manuallyDisconnected.has(jid)) {
-                global.manuallyDisconnected.delete(jid);
-                logMessages.push(chalk.yellow(`[RECONNECT ALL] Removed ${jid} from runtime manuallyDisconnected list.`));
-            }
-            global.db.data.manualDisconnects = global.db.data.manualDisconnects.filter(id => id !== jid);
-            logMessages.push(chalk.green(`[RECONNECT ALL] Removed ${jid} from persistent database (manualDisconnects).`));
-        }
-
-        // 3. Attempt to reconnect
-        try {
-            await startpairing(jid);
-            reconnectedCount++;
-            logMessages.push(chalk.green(`[RECONNECT ALL] Initiated reconnection for ${jid}.`));
-            await sleep(1000); // Small delay to prevent overwhelming WhatsApp or your server
-        } catch (e) {
-            failedToReconnectCount++;
-            logMessages.push(chalk.red(`[RECONNECT ALL] Failed to initiate reconnection for ${jid}: ${e.message}`));
-        }
-    }
-
-    // Save DB after all modifications
-    await global.db.write();
-    logMessages.push(chalk.green("[RECONNECT ALL] Database updated after reconnection attempts."));
-
-    const summary = `
-Reconnection Summary:
-✅ Initiated reconnect for: ${reconnectedCount} socket(s)
-ℹ️ Already active: ${alreadyActiveCount} socket(s)
-❌ Failed to reconnect: ${failedToReconnectCount} socket(s)
-    `.trim();
-
-    console.log(logMessages.join('\n')); // Log detailed messages to console
-    await reply(summary); // Reply with summary to user
-  }
-}, 
 {
   command: ['premiumstatus', 'premstyle'],
   operate: async ({ m, reply, db, Matrix, sender }) => {
@@ -2333,16 +2003,14 @@ Reconnection Summary:
       await Matrix.sendMessage(m.chat, { react: { text: "✖️", key: m.key } });
     }
   }
-}, {
+},  {
   command: ['checkbots'],
   operate: async ({ m, isCreator, reply }) => {
     if (!isCreator) return reply("❌ Owner only.");
     let activeBots = Object.keys(global.activeSockets).join('\n') || "None";
-    let manuallyDisc = Array.from(global.manuallyDisconnected).join('\n') || "None";
-    reply(`*Active Sockets:*\n${activeBots}\n\n*Manually Disconnected:*\n${manuallyDisc}`);
+    reply(`*Active Sessions:*\n${activeBots}`);
   }
 },
-
 
 {
   command: ['listprem'],
