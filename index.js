@@ -18,7 +18,7 @@ const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
 
 const extendWASocket = require('./lib/matrixUtils'); 
-const { startPremiumWatcher } = require('./lib/premiumSystem'); 
+
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
 const { color } = require('./lib/color')
@@ -40,7 +40,6 @@ const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./li
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
 const { toAudio, toPTT, toVideo } = require('./lib/converter')
 const FileType = require('file-type')
-const startpairing = require('./rentbot'); 
 
 const store = {
   messages: {}, // { [jid]: WebMessageInfo[] }
@@ -81,51 +80,36 @@ const localDb = path.join(__dirname, "src", "database.json");
 global.db = new Low(new JSONFile(localDb));
 
 global.loadDatabase = async function loadDatabase() {
-    console.log("[DEBUG] Entering loadDatabase function."); // <-- ADDED
-    if (global.db.READ) {
-        console.log("[DEBUG] Database already being read, waiting for previous operation."); // <-- ADDED
-        return new Promise(resolve => setInterval(() => {
-            if (!global.db.READ) {
-                clearInterval(this);
-                resolve(global.db.data ?? global.loadDatabase());
-            }
-        }, 1000));
-    }
+    if (global.db.READ) return new Promise(resolve => setInterval(() => {
+        if (!global.db.READ) {
+            clearInterval(this);
+            resolve(global.db.data ?? global.loadDatabase());
+        }
+    }, 1000));
 
-    if (global.db.data !== null) {
-        console.log("[DEBUG] Database data already exists. Current data keys:", Object.keys(global.db.data || {})); // <-- ADDED
-        return;
-    }
+    if (global.db.data !== null) return;
 
     global.db.READ = true;
-    console.log("[DEBUG] global.db.READ set to true."); // <-- ADDED
 
     try {
-        console.log("[DEBUG] Attempting to read global.db (local database)."); // <-- ADDED
         await global.db.read();
-        console.log("[DEBUG] global.db.read() completed. Current global.db.data:", global.db.data); // <-- ADDED
 
         if (!global.db.data || Object.keys(global.db.data).length === 0) {
-            console.log("[DEBUG] Local DB is empty or null. Attempting GitHub sync via readDB."); // <-- ADDED
+            console.log("[ADIZATU] Syncing local database...");
             await readDB(); // Assuming readDB populates global.db.data
             await global.db.read(); // Re-read after potential GitHub sync
-            console.log("[DEBUG] After readDB and re-read. Current global.db.data:", global.db.data); // <-- ADDED
         }
 
     } catch (error) {
-        console.error("❌ Error loading database during read:", error);
-        global.db.data = {}; // Ensure it's an object even on error
-        console.log("[DEBUG] global.db.data set to {} in catch block."); // <-- ADDED
+        console.error("❌ Error loading database:", error);
+        global.db.data = {};
     }
 
     global.db.READ = false;
-    console.log("[DEBUG] global.db.READ set to false."); // <-- ADDED
 
-    global.db.data ??= {}; // Ensure it's an object if still null/undefined
-    console.log("[DEBUG] After global.db.data ??= {}. Current global.db.data:", global.db.data); // <-- ADDED
+    global.db.data ??= {};
 
     // --- START MODIFICATION ---
-    console.log("[DEBUG] Initializing/merging default database structure."); // <-- ADDED
     global.db.data = {
       chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
       users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
@@ -153,12 +137,10 @@ global.loadDatabase = async function loadDatabase() {
       sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
       premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
 };
-    console.log("[DEBUG] Default structure initialized. Final global.db.data:", global.db.data); // <-- ADDED
     // --- END MODIFICATION ---
 
     global.db.chain = _.chain(global.db.data);
     await global.db.write();
-    console.log("[DEBUG] Database written to file. Exiting loadDatabase function."); // <-- ADDED
 };
 
 
@@ -255,10 +237,6 @@ global.writeDB = async function () {
     }
     await global.loadDatabase();
     
-    // Verify here after loadDatabase finishes
-    console.log("[DEBUG] After global.loadDatabase() call in main IIFE. global.db.data:", global.db.data); // <-- ADDED
-    console.log("[DEBUG] Attempting to access global.db.data.premium."); // <-- ADDED
-
     // Ensure global.ownernumber is a full JID before bot start
     if (global.ownernumber && !global.ownernumber.includes('@s.whatsapp.net')) {
         global.ownernumber = `${global.ownernumber}@s.whatsapp.net`;
@@ -266,7 +244,7 @@ global.writeDB = async function () {
     }
 
     // --- NEW: Require premiumSystem HERE, after DB is loaded ---
-//    require('./lib/premiumSystem');
+    require('./lib/premiumSystem');
 
     Object.defineProperty(global, "mode", {
       get() { return global.db.data.settings.mode || "public" },
@@ -288,7 +266,7 @@ global.writeDB = async function () {
 })(); // End of the main async IIFE
 
 if (global.dbToken) {
-    setInterval(global.writeDB, 15 * 60 * 1000);
+    setInterval(global.writeDB, 30 * 60 * 1000);
 }
 
 if (global.db) setInterval(async () => {
@@ -296,7 +274,6 @@ if (global.db) setInterval(async () => {
 }, 30 * 1000);
 
 // ... rest of your index.js code remains the same ...
-
 
 let phoneNumber = "233544981163"
 const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code")
@@ -467,7 +444,8 @@ async function startMatrix() {
   
   global.mainMatrix = Matrix;
   
-  
+//  require('./lib/premiumSystem'); 
+
   // Extend the Matrix object with your custom utilities
   extendWASocket(Matrix);
 
@@ -488,9 +466,7 @@ async function startMatrix() {
     }
   });
 
- startPremiumWatcher(); 
   
-    
   setInterval(() => {
   }, 10000);
   // --- END ADDED DEBUG LOG ---
@@ -595,7 +571,46 @@ await Matrix.sendMessage(Matrix.user.id, {
 
 
 
+        // ====================================\\
+        // Add deleteFolderRecursive and pairing folder cleanup from main.js here
+        const { promisify } = require('util');
+        const readdir = promisify(fs.readdir);
+        // rmdir, stat, unlink are not directly used in the cleanup logic, so can be omitted if not used elsewhere
+        async function deleteFolderRecursive(path) {
+            fs.rm(path, { recursive: true, force: true }, (err) => {
+                if (err) console.error(`Error deleting ${path}:`, err);
+                else console.log(`Deleted folder: ${path}`);
+            });
+        }
+        await sleep(1999); // (already there, but re-confirming for context)
+        fs.readdir('./lib/pairing/', { withFileTypes: true }, async (err, dirents) => {
+            if (err) return console.error(err);
 
+            for (let i = 0; i < dirents.length; i++) {
+                const dirent = dirents[i];
+                const dirPath = `./lib/pairing/${dirent.name}`;
+
+                if (dirent.isDirectory()) {
+                    try {
+                        const files = await readdir(dirPath);
+                        if (files.length === 0) {
+                            // Wait for 1 minute before deleting the folder
+                            await sleep(60000);
+                            await deleteFolderRecursive(dirPath);
+                        } else {
+                            console.log(dirent.name);
+                            // If you need the re-pairing logic, ensure rentbot.js is available
+                            const startpairing = require('./rentbot.js');
+                            await startpairing(dirent.name);
+                            await sleep(200);
+                        }
+                    } catch (err) {
+                        console.error(`Error processing directory ${dirent.name}:`, err);
+                    }
+                }
+            }
+        });
+        // ====================================\\
     }
 
 } catch (err) {
@@ -1454,37 +1469,8 @@ app.listen(port, (err) => {
 (async () => {
     try {
         console.log("Starting WhatsApp bot...");
-        await matrix(); // This starts your main WhatsApp bot logic (which includes loading DB and main bot)
+        await matrix(); // This starts your main WhatsApp bot logic
         console.log("WhatsApp bot started! Starting Telegram bot...");
-
-        // --- NEW BLOCK: Start Rent Bots ---
-        console.log("[ADIZATU] Attempting to start sessions for premium rent bot users...");
-        
-        const premiumUsers = global.db.data.premium || []; // Access the loaded premium users from your DB
-        if (premiumUsers.length === 0) {
-            console.log("[ADIZATU] No premium users found in the database. Skipping rent bot startup.");
-        } else {
-            for (const user of premiumUsers) {
-                const userJid = user.jid;
-                // Double-check if the session folder and creds.json exist locally
-                // `rentbot.js`'s IIFE should have already downloaded them at this point
-                const sessionDir = path.join(__dirname, 'lib', 'pairing', userJid);
-                const credsFile = path.join(sessionDir, 'creds.json');
-
-                if (fs.existsSync(credsFile)) {
-                    console.log(chalk.yellow(`[ADIZATU] Found session for premium user ${userJid}. Attempting to start...`));
-                    await startpairing(userJid); // Call startpairing for each premium user
-                    await sleep(1000); // Small delay to avoid overwhelming the system
-                } else {
-                    console.log(chalk.red(`[ADIZATU] No local session files found for premium user ${userJid}. Skipping connection.`));
-                    // This might happen if downloadPairingSessions failed for this user, or it's a new premium user
-                    // who hasn't paired yet. They will need to pair first.
-                }
-            }
-            console.log("[ADIZATU] Finished attempting to start rent bot sessions.");
-        }
-        // --- END NEW BLOCK ---
-
         await startAdiza(); // This starts the Telegram bot logic
         console.log("All bots launched successfully!");
     } catch (error) {
