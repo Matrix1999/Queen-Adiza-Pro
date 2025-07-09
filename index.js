@@ -237,12 +237,14 @@ global.writeDB = async function () {
     }
     await global.loadDatabase();
     
-        // Ensure global.ownernumber is a full JID before bot start
+    // Ensure global.ownernumber is a full JID before bot start
     if (global.ownernumber && !global.ownernumber.includes('@s.whatsapp.net')) {
         global.ownernumber = `${global.ownernumber}@s.whatsapp.net`;
         console.log(`[ADIZATU] Owner number normalized to: ${global.ownernumber}`);
     }
 
+    // --- NEW: Require premiumSystem HERE, after DB is loaded ---
+    require('./lib/premiumSystem');
 
     Object.defineProperty(global, "mode", {
       get() { return global.db.data.settings.mode || "public" },
@@ -257,17 +259,21 @@ global.writeDB = async function () {
         .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
     ];
     await global.db.write();
-})();
 
+    // --- Call startMatrix() HERE, after premiumSystem is loaded ---
+    await startMatrix();
+
+})(); // End of the main async IIFE
 
 if (global.dbToken) {
-    setInterval(writeDB, 30 * 60 * 1000);
+    setInterval(global.writeDB, 30 * 60 * 1000);
 }
 
 if (global.db) setInterval(async () => {
     if (global.db.data) await global.db.write();
 }, 30 * 1000);
 
+// ... rest of your index.js code remains the same ...
 
 let phoneNumber = "233544981163"
 const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code")
@@ -282,7 +288,6 @@ return new Promise((resolve) => {
 rl.question(text, resolve)
 })
 };
-
 
 
 function cleanUp() {
