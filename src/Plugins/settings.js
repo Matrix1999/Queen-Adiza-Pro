@@ -5,8 +5,7 @@ hi();
 const fs = require("fs");
 const fsp = fs.promises;
 
-// Declare isPremium once at the top
-const { isPremium } = require('../../lib/premiumSystem'); 
+const { calculateExpiry, isPremium, checkCommandAccess } = require('../../lib/premiumSystem');
 
 module.exports = [ 
 {
