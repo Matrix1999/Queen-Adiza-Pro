@@ -1,13 +1,12 @@
-
 require('events').EventEmitter.defaultMaxListeners = 50;
-require('./settings'); 
+require('./settings');
 const {
     Telegraf,
     Markup
 } = require('telegraf');
 const {
     simple
-} = require("./lib/myfunc"); 
+} = require("./lib/myfunc");
 global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
 const fs = require("fs");
 const os = require('os');
@@ -17,7 +16,7 @@ const chalk = require('chalk');
 const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
 
-const extendWASocket = require('./lib/matrixUtils'); 
+const extendWASocket = require('./lib/matrixUtils');
 
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
@@ -36,7 +35,7 @@ const readmore = String.fromCharCode(8206).repeat(4001);
 const { File } = require('megajs');
 const PhoneNumber = require("awesome-phonenumber");
 const readline = require("readline");
-const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc") 
+const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc")
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
 const { toAudio, toPTT, toVideo } = require('./lib/converter')
 const FileType = require('file-type')
@@ -79,8 +78,6 @@ const localDb = path.join(__dirname, "src", "database.json");
 
 global.db = new Low(new JSONFile(localDb));
 
-// ... (lines above global.loadDatabase)
-
 global.loadDatabase = async function loadDatabase() {
     if (global.db.READ) return new Promise(resolve => setInterval(() => {
         if (!global.db.READ) {
@@ -109,13 +106,12 @@ global.loadDatabase = async function loadDatabase() {
     global.db.READ = false;
 
     global.db.data ??= {}; // Ensure it's an object if null
-    
-    // --- START MODIFICATION ---
+
     global.db.data = {
       chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
       users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
       settings: global.db.data.settings && Object.keys(global.db.data.settings).length ? global.db.data.settings : {
-    
+
         autobio: false,
         anticall: false,
         autotype: false,
@@ -138,8 +134,6 @@ global.loadDatabase = async function loadDatabase() {
       sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
       premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
 };
-    // --- END MODIFICATION ---
-
     global.db.chain = _.chain(global.db.data);
     await global.db.write();
 };
@@ -210,9 +204,11 @@ async function readDB() {
 
             global.db.data = {
                 chats: previousData.chats || {},
+                users: previousData.users || {}, // Ensure users is initialized
                 settings: { ...defaultSettings, ...(previousData.settings || {}) },
                 blacklist: previousData.blacklist || { blacklisted_numbers: [] },
-                sudo: Array.isArray(previousData.sudo) ? previousData.sudo : []
+                sudo: Array.isArray(previousData.sudo) ? previousData.sudo : [],
+                premium: Array.isArray(previousData.premium) ? previousData.premium : []
             };
 
             global.db.chain = _.chain(global.db.data);
@@ -282,7 +278,7 @@ async function readDB() {
 
     // Now define modeStatus
     global.settings = global.db.data.settings;
-  global.modeStatus = global.settings.mode === "public" ? "Public" : global.settings.mode === "private" ? "Private" : global.settings.mode === "group" ? "Group Only" : global.settings.mode === "pm" ? "PM Only" : "Unknown";
+    global.modeStatus = global.settings.mode === "public" ? "Public" : global.settings.mode === "private" ? "Private" : global.settings.mode === "group" ? "Group Only" : global.settings.mode === "pm" ? "PM Only" : "Unknown";
 
 //sudo//
   global.db.data.settings.sudo = global.db.data.settings.sudo || [
@@ -469,18 +465,18 @@ async function startMatrix() {
     msgRetryCounterCache,
     defaultQueryTimeoutMs: undefined,
   });
-  
-  
+
+
   global.mainMatrix = Matrix;
-  
-  require('./lib/premiumSystem'); 
+
+  require('./lib/premiumSystem');
 
   // Extend the Matrix object with your custom utilities
   extendWASocket(Matrix);
 
   // Presence update event listener — track who is online/offline
   Matrix.ev.on('presence.update', ({ id, presences }) => {
-  
+
     if (!store.presences) store.presences = {};
     if (!store.presences[id]) store.presences[id] = {};
 
@@ -495,7 +491,7 @@ async function startMatrix() {
     }
   });
 
-  
+
   setInterval(() => {
   }, 10000);
   // --- END ADDED DEBUG LOG ---
@@ -514,7 +510,7 @@ async function startMatrix() {
     }, 3000);
   }
 
-  
+
 
 Matrix.ev.on('connection.update', async (update) => {
 	const {
@@ -578,20 +574,20 @@ await Matrix.sendMessage(Matrix.user.id, {
     "╭༺◈👸🌹𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔🌹👸\n" +
     "│📌 » *Username*: " + Matrix.user.name + "\n" +
     "│💻 » *Platform*: " + os.platform() + "\n" +
-    "│⚡ » *Global Fallback Prefix*: [ . ]\n" + 
+    "│⚡ » *Global Fallback Prefix*: [ . ]\n" +
     "│🚀 » *Global Fallback Mode*: Public\n" +
     "│🤖 » *Version*: [ " + versions + " ]\n" +
     "╰───━━━༺◈༻━━━───╯\n\n" + // Main bot info block
 
     "╭༺◈👑 *𝗕𝗢𝗧 𝗦𝗧𝗔𝗧𝗨𝗦* 👑◈༻╮\n" +
     `│🕒 *Uptime*: ${runtime(process.uptime())}\n` +
-    "╰───━━━༺◈༻━━━───╯\n\n" + 
+    "╰───━━━༺◈༻━━━───╯\n\n" +
 
-    
+
     "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" +
-    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMM YYYY')}\n` +
-    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` + 
-    `╰───━━━༺◈༻━━━───╯\n` 
+    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMMYYYY')}\n` +
+    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` +
+    `╰───━━━༺◈༻━━━───╯\n`
 
 }, {
   ephemeralExpiration: 1800
@@ -725,9 +721,9 @@ Matrix.ev.on('messages.upsert', async (chatUpdate) => {
       if (
         msg.key.id.startsWith('BAE5') ||
         (msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (!msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (msg.key.id.length !== 32 && msg.key.id.length !== 20)
+        (!msg.key.id.startsWith('3EBO') && msg.key.id.length !== 22 && msg.key.id.length !== 32 && msg.key.id.length !== 20)
       ) continue;
+
 
       // Avoid processing duplicates
       if (processedMessages.has(messageId)) continue;
