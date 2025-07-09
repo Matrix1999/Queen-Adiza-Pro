@@ -295,9 +295,9 @@ await global.db.write();
 
 
 // This is the correct interval for syncing with GitHub, using global.writeDB
-if (global.dbToken) {
+/* if (global.dbToken) {
     setInterval(global.writeDB, 30 * 60 * 1000); 
-}
+} */
 
 // REMOVED THE FOLLOWING BLOCK WHICH WAS CAUSING THE ERROR:
 // if (global.db) setInterval(async () => {
@@ -497,8 +497,8 @@ async function startMatrix() {
   });
 
   
-  //setInterval(() => {
-//  }, 10000);
+  setInterval(() => {
+  }, 10000);
   // --- END ADDED DEBUG LOG ---
 
   // Your existing pairing code logic
