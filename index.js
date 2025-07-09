@@ -1,7 +1,6 @@
 
 require('events').EventEmitter.defaultMaxListeners = 50;
 require('./settings'); 
-global.dbToken = process.env.DB_TOKEN;
 const {
     Telegraf,
     Markup
