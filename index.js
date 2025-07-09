@@ -265,8 +265,7 @@ global.writeDB = async function () {
         console.log(`[ADIZATU] Owner number normalized to: ${global.ownernumber}`);
     }
 
-    // --- NEW: Require premiumSystem HERE, after DB is loaded ---
-    require('./lib/premiumSystem');
+
 
     Object.defineProperty(global, "mode", {
       get() { return global.db.data.settings.mode || "public" },
