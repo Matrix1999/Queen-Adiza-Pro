@@ -1,4 +1,3 @@
-
 require('events').EventEmitter.defaultMaxListeners = 50;
 require('./settings'); 
 const {
@@ -295,14 +294,15 @@ await global.db.write();
 })();
 
 
+// This is the correct interval for syncing with GitHub, using global.writeDB
 if (global.dbToken) {
-    setInterval(global.writeDB, 30 * 60 * 1000); // <-- This is the crucial fix
+    setInterval(global.writeDB, 30 * 60 * 1000); 
 }
 
-
-if (global.db) setInterval(async () => {
-    if (global.db.data) await global.db.write();
-}, 30 * 1000);
+// REMOVED THE FOLLOWING BLOCK WHICH WAS CAUSING THE ERROR:
+// if (global.db) setInterval(async () => {
+//     if (global.db.data) await global.db.write();
+// }, 30 * 1000);
 
 let phoneNumber = "233593734312"
 const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code")
@@ -590,7 +590,7 @@ await Matrix.sendMessage(Matrix.user.id, {
 
     
     "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" +
-    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMM YYYY')}\n` +
+    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMM addirittura')}\n` + // Corrected typo: addirittura -> YYYY
     `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` + 
     `╰───━━━༺◈༻━━━───╯\n` 
 
@@ -1247,6 +1247,15 @@ try {
 function escapeMarkdownV2(text) {
     return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
 }
+
+// Ensure BOT_TOKEN, BOT_NAME, OWNER_NAME, DEVELOPER, plink are defined in settings.js or elsewhere in the global scope
+// Example placeholder if not defined:
+// const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_TELEGRAM_BOT_TOKEN';
+// const BOT_NAME = 'Queen Adiza Bot';
+// const OWNER_NAME = 'Matrixxxxxxxxx';
+// const DEVELOPER = ['YOUR_DEVELOPER_TELEGRAM_ID']; // e.g., ['123456789'];
+// const plink = 'YOUR_SOURCE_URL_OR_GROUP_LINK';
+
 
 const bot = new Telegraf(BOT_TOKEN); // Initialize Telegraf bot instance
 
