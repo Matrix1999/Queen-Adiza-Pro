@@ -81,36 +81,51 @@ const localDb = path.join(__dirname, "src", "database.json");
 global.db = new Low(new JSONFile(localDb));
 
 global.loadDatabase = async function loadDatabase() {
-    if (global.db.READ) return new Promise(resolve => setInterval(() => {
-        if (!global.db.READ) {
-            clearInterval(this);
-            resolve(global.db.data ?? global.loadDatabase());
-        }
-    }, 1000));
+    console.log("[DEBUG] Entering loadDatabase function."); // <-- ADDED
+    if (global.db.READ) {
+        console.log("[DEBUG] Database already being read, waiting for previous operation."); // <-- ADDED
+        return new Promise(resolve => setInterval(() => {
+            if (!global.db.READ) {
+                clearInterval(this);
+                resolve(global.db.data ?? global.loadDatabase());
+            }
+        }, 1000));
+    }
 
-    if (global.db.data !== null) return;
+    if (global.db.data !== null) {
+        console.log("[DEBUG] Database data already exists. Current data keys:", Object.keys(global.db.data || {})); // <-- ADDED
+        return;
+    }
 
     global.db.READ = true;
+    console.log("[DEBUG] global.db.READ set to true."); // <-- ADDED
 
     try {
+        console.log("[DEBUG] Attempting to read global.db (local database)."); // <-- ADDED
         await global.db.read();
+        console.log("[DEBUG] global.db.read() completed. Current global.db.data:", global.db.data); // <-- ADDED
 
         if (!global.db.data || Object.keys(global.db.data).length === 0) {
-            console.log("[ADIZATU] Syncing local database...");
+            console.log("[DEBUG] Local DB is empty or null. Attempting GitHub sync via readDB."); // <-- ADDED
             await readDB(); // Assuming readDB populates global.db.data
             await global.db.read(); // Re-read after potential GitHub sync
+            console.log("[DEBUG] After readDB and re-read. Current global.db.data:", global.db.data); // <-- ADDED
         }
 
     } catch (error) {
-        console.error("❌ Error loading database:", error);
-        global.db.data = {};
+        console.error("❌ Error loading database during read:", error);
+        global.db.data = {}; // Ensure it's an object even on error
+        console.log("[DEBUG] global.db.data set to {} in catch block."); // <-- ADDED
     }
 
     global.db.READ = false;
+    console.log("[DEBUG] global.db.READ set to false."); // <-- ADDED
 
-    global.db.data ??= {};
+    global.db.data ??= {}; // Ensure it's an object if still null/undefined
+    console.log("[DEBUG] After global.db.data ??= {}. Current global.db.data:", global.db.data); // <-- ADDED
 
     // --- START MODIFICATION ---
+    console.log("[DEBUG] Initializing/merging default database structure."); // <-- ADDED
     global.db.data = {
       chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
       users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
@@ -138,10 +153,12 @@ global.loadDatabase = async function loadDatabase() {
       sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
       premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
 };
+    console.log("[DEBUG] Default structure initialized. Final global.db.data:", global.db.data); // <-- ADDED
     // --- END MODIFICATION ---
 
     global.db.chain = _.chain(global.db.data);
     await global.db.write();
+    console.log("[DEBUG] Database written to file. Exiting loadDatabase function."); // <-- ADDED
 };
 
 
@@ -238,6 +255,10 @@ global.writeDB = async function () {
     }
     await global.loadDatabase();
     
+    // Verify here after loadDatabase finishes
+    console.log("[DEBUG] After global.loadDatabase() call in main IIFE. global.db.data:", global.db.data); // <-- ADDED
+    console.log("[DEBUG] Attempting to access global.db.data.premium."); // <-- ADDED
+
     // Ensure global.ownernumber is a full JID before bot start
     if (global.ownernumber && !global.ownernumber.includes('@s.whatsapp.net')) {
         global.ownernumber = `${global.ownernumber}@s.whatsapp.net`;
@@ -275,6 +296,7 @@ if (global.db) setInterval(async () => {
 }, 30 * 1000);
 
 // ... rest of your index.js code remains the same ...
+
 
 let phoneNumber = "233544981163"
 const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code")
