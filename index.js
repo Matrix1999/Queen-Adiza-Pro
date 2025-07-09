@@ -1,12 +1,13 @@
+
 require('events').EventEmitter.defaultMaxListeners = 50;
-require('./settings');
+require('./settings'); 
 const {
     Telegraf,
     Markup
 } = require('telegraf');
 const {
     simple
-} = require("./lib/myfunc");
+} = require("./lib/myfunc"); 
 global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
 const fs = require("fs");
 const os = require('os');
@@ -16,7 +17,7 @@ const chalk = require('chalk');
 const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
 
-const extendWASocket = require('./lib/matrixUtils');
+const extendWASocket = require('./lib/matrixUtils'); 
 
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
@@ -35,7 +36,7 @@ const readmore = String.fromCharCode(8206).repeat(4001);
 const { File } = require('megajs');
 const PhoneNumber = require("awesome-phonenumber");
 const readline = require("readline");
-const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc")
+const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc") 
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
 const { toAudio, toPTT, toVideo } = require('./lib/converter')
 const FileType = require('file-type')
@@ -78,6 +79,8 @@ const localDb = path.join(__dirname, "src", "database.json");
 
 global.db = new Low(new JSONFile(localDb));
 
+// ... (lines above global.loadDatabase)
+
 global.loadDatabase = async function loadDatabase() {
     if (global.db.READ) return new Promise(resolve => setInterval(() => {
         if (!global.db.READ) {
@@ -106,12 +109,13 @@ global.loadDatabase = async function loadDatabase() {
     global.db.READ = false;
 
     global.db.data ??= {}; // Ensure it's an object if null
-
-    // Ensure all top-level properties are initialized as objects/arrays
+    
+    // --- START MODIFICATION ---
     global.db.data = {
-      chats: global.db.data.chats || {},
-      users: global.db.data.users || {},
-      settings: global.db.data.settings || {
+      chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
+      users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
+      settings: global.db.data.settings && Object.keys(global.db.data.settings).length ? global.db.data.settings : {
+    
         autobio: false,
         anticall: false,
         autotype: false,
@@ -128,49 +132,16 @@ global.loadDatabase = async function loadDatabase() {
         autoreactstatus: false,
         autorecordtype: false
       },
-      blacklist: global.db.data.blacklist || {
+      blacklist: global.db.data.blacklist && Object.keys(global.db.data.blacklist).length ? global.db.data.blacklist : {
         blacklisted_numbers: []
       },
-      sudo: Array.isArray(global.db.data.sudo) ? global.db.data.sudo : [],
+      sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
       premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
-    };
+};
+    // --- END MODIFICATION ---
 
     global.db.chain = _.chain(global.db.data);
     await global.db.write();
-};
-
-
-// Define global.writeDB outside of readDB so it's always accessible
-global.writeDB = async function () {
-    if (!global.dbToken) return;
-    try {
-        await global.db.write(); // Write localdb data first
-
-        const octokit = await getOctokit();
-        const owner = await getOwner(octokit);
-        const content = fs.readFileSync(localDb, "utf-8"); // Read from localDb
-
-        let sha;
-        try {
-            const { data } = await octokit.repos.getContent({ owner, repo: dbName, path: dbPath });
-            sha = data.sha;
-        } catch (error) {
-            if (error.status !== 404) throw error;
-        }
-
-        await octokit.repos.createOrUpdateFileContents({
-            owner,
-            repo: dbName,
-            path: dbPath,
-            message: `Updated database`,
-            content: Buffer.from(content).toString("base64"),
-            sha,
-        });
-
-        console.log("[MATRIX-X] Successfully synced database.");
-    } catch (error) {
-        console.error("❌ Error writing database to GitHub:", error);
-    }
 };
 
 
@@ -193,7 +164,7 @@ async function createDB() {
         await octokit.repos.createForAuthenticatedUser({ name: dbName, private: true });
         console.log("[MATRIX-X] Database created successfully.");
     } catch (error) {
-        if (error.status === 422) { // Repository already exists
+        if (error.status === 422) {
             return;
         } else {
             console.error("❌ Error creating repository database:", error);
@@ -211,10 +182,8 @@ async function readDB() {
         const content = Buffer.from(data.content, "base64").toString("utf-8");
 
         if (!content || content.trim() === "{}") {
-            // If content is empty or just an empty object, no need to merge, just write defaults if needed
             return;
         }
-
         const defaultSettings = {
             prefix: ".",
             mode: "public",
@@ -236,32 +205,61 @@ async function readDB() {
         };
 
         try {
-            await global.db.read(); // Read existing local data
-            const githubData = JSON.parse(content); // Parse content from GitHub
+            await global.db.read();
+            const previousData = global.db.data || {};
 
-            // Merge data from GitHub into localDb, prioritizing GitHub for sync
             global.db.data = {
-                chats: githubData.chats || {},
-                users: githubData.users || {}, // Ensure users from GitHub are loaded
-                settings: { ...defaultSettings, ...(githubData.settings || {}) },
-                blacklist: githubData.blacklist || { blacklisted_numbers: [] },
-                sudo: Array.isArray(githubData.sudo) ? githubData.sudo : [],
-                premium: Array.isArray(githubData.premium) ? githubData.premium : []
+                chats: previousData.chats || {},
+                settings: { ...defaultSettings, ...(previousData.settings || {}) },
+                blacklist: previousData.blacklist || { blacklisted_numbers: [] },
+                sudo: Array.isArray(previousData.sudo) ? previousData.sudo : []
             };
 
             global.db.chain = _.chain(global.db.data);
-            await global.db.write(); // Write the merged data back to local DB
+            await global.db.write();
 
-            fs.writeFileSync(localDb, content); // Overwrite local file with GitHub content
-            console.log("[MATRIX-X] Synced local database successfully from GitHub.");
+            fs.writeFileSync(localDb, content);
+            console.log("[MATRIX-X] Synced local database successfully.");
         } catch (error) {
             if (error.status === 404) {
-                console.log("[MATRIX-X] Database file not found on GitHub. Creating it...");
-                await global.writeDB(); // Now this call to global.writeDB is correct
+                console.log("[MATRIX-X] Creating database....");
+                await writeDB();
             } else {
                 console.error("❌ Error reading database from GitHub:", error);
             }
         }
+
+        global.writeDB = async function () {
+            if (!global.dbToken) return;
+            try {
+                await global.db.write();
+
+                const octokit = await getOctokit();
+                const owner = await getOwner(octokit);
+                const content = fs.readFileSync(localDb, "utf-8");
+                let sha;
+
+                try {
+                    const { data } = await octokit.repos.getContent({ owner, repo: dbName, path: dbPath });
+                    sha = data.sha;
+                } catch (error) {
+                    if (error.status !== 404) throw error;
+                }
+
+                await octokit.repos.createOrUpdateFileContents({
+                    owner,
+                    repo: dbName,
+                    path: dbPath,
+                    message: `Updated database`,
+                    content: Buffer.from(content).toString("base64"),
+                    sha,
+                });
+
+                console.log("[MATRIX-X] Successfully synced database.");
+            } catch (error) {
+                console.error("❌ Error writing database to GitHub:", error);
+            }
+        };
 
     } catch (error) {
         console.error("❌ Error in readDB:", error);
@@ -274,7 +272,7 @@ async function readDB() {
         await createDB();
         await readDB();
     }
-    await global.loadDatabase(); // Ensure database is fully loaded and initialized here
+    await global.loadDatabase();
 
     // Define global.mode to always reflect the DB
     Object.defineProperty(global, "mode", {
@@ -284,27 +282,21 @@ async function readDB() {
 
     // Now define modeStatus
     global.settings = global.db.data.settings;
-    global.modeStatus = global.settings.mode === "public" ? "Public" : global.settings.mode === "private" ? "Private" : global.settings.mode === "group" ? "Group Only" : global.settings.mode === "pm" ? "PM Only" : "Unknown";
+  global.modeStatus = global.settings.mode === "public" ? "Public" : global.settings.mode === "private" ? "Private" : global.settings.mode === "group" ? "Group Only" : global.settings.mode === "pm" ? "PM Only" : "Unknown";
 
-    //sudo//
-    global.db.data.settings.sudo = global.db.data.settings.sudo || [
-      ...(Array.isArray(global.sudo) ? global.sudo : [])
-        .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
-    ];
-    await global.db.write();
-
-    // *******************************************************************
-    // IMPORTANT: Require premiumSystem.js *AFTER* global.loadDatabase()
-    // This ensures global.db.data.premium is initialized.
-    require('./lib/premiumSystem');
-    // *******************************************************************
+//sudo//
+  global.db.data.settings.sudo = global.db.data.settings.sudo || [
+  ...(Array.isArray(global.sudo) ? global.sudo : [])
+    .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
+];
+await global.db.write();
 
     // ...rest of your startup logic (startMatrix, etc)...
 })();
 
 
 if (global.dbToken) {
-    setInterval(global.writeDB, 30 * 60 * 1000); // Correctly calls global.writeDB
+    setInterval(writeDB, 30 * 60 * 1000);
 }
 
 if (global.db) setInterval(async () => {
@@ -477,32 +469,37 @@ async function startMatrix() {
     msgRetryCounterCache,
     defaultQueryTimeoutMs: undefined,
   });
-
-
+  
+  
   global.mainMatrix = Matrix;
+  
+  require('./lib/premiumSystem'); 
 
   // Extend the Matrix object with your custom utilities
   extendWASocket(Matrix);
 
   // Presence update event listener — track who is online/offline
   Matrix.ev.on('presence.update', ({ id, presences }) => {
-
+  
     if (!store.presences) store.presences = {};
     if (!store.presences[id]) store.presences[id] = {};
 
     if (presences) {
-      for (const [userJid, presenceInfo] of Object.entries(presences)) { // FIX: Added closing brace for this loop
+      for (const [userJid, presenceInfo] of Object.entries(presences)) {
         if (presenceInfo.lastKnownPresence === 'available') {
           store.presences[id][userJid] = true;
         } else {
           delete store.presences[id][userJid];
         }
-      } // FIX: Missing closing brace added here
+      }
     }
   });
 
+  
+  setInterval(() => {
+  }, 10000);
+  // --- END ADDED DEBUG LOG ---
 
-  // Removed the problematic empty setInterval from here
   // Your existing pairing code logic
   if (usePairingCode && !Matrix.authState.creds.registered) {
     if (useMobile) throw new Error('Cannot use pairing code with mobile API');
@@ -517,7 +514,7 @@ async function startMatrix() {
     }, 3000);
   }
 
-
+  
 
 Matrix.ev.on('connection.update', async (update) => {
 	const {
@@ -581,20 +578,20 @@ await Matrix.sendMessage(Matrix.user.id, {
     "╭༺◈👸🌹𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔🌹👸\n" +
     "│📌 » *Username*: " + Matrix.user.name + "\n" +
     "│💻 » *Platform*: " + os.platform() + "\n" +
-    "│⚡ » *Global Fallback Prefix*: [ . ]\n" +
+    "│⚡ » *Global Fallback Prefix*: [ . ]\n" + 
     "│🚀 » *Global Fallback Mode*: Public\n" +
     "│🤖 » *Version*: [ " + versions + " ]\n" +
     "╰───━━━༺◈༻━━━───╯\n\n" + // Main bot info block
 
     "╭༺◈👑 *𝗕𝗢𝗧 𝗦𝗧𝗔𝗧𝗨𝗦* 👑◈༻╮\n" +
     `│🕒 *Uptime*: ${runtime(process.uptime())}\n` +
-    "╰───━━━༺◈༻━━━───╯\n\n" +
+    "╰───━━━༺◈༻━━━───╯\n\n" + 
 
-
+    
     "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" +
-    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMMYYYY')}\n` +
-    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` +
-    `╰───━━━༺◈༻━━━───╯\n`
+    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMM YYYY')}\n` +
+    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` + 
+    `╰───━━━༺◈༻━━━───╯\n` 
 
 }, {
   ephemeralExpiration: 1800
@@ -655,7 +652,7 @@ Matrix.ev.on('creds.update', saveCreds);
 
 // appenTextMessage function definition for poll updates
 const appenTextMessage = async (m, MatrixInstance, text, chatUpdate) => { // Renamed AdizaBotInc to MatrixInstance
-    let messages = await generateWAMessageFromContent(
+    let messages = await generateWAMessage(
       m.key.remoteJid,
       {
         text: text
@@ -728,7 +725,8 @@ Matrix.ev.on('messages.upsert', async (chatUpdate) => {
       if (
         msg.key.id.startsWith('BAE5') ||
         (msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
-        (!msg.key.id.startsWith('3EBO') && msg.key.id.length !== 32 && msg.key.id.length !== 20) // Corrected logic here
+        (!msg.key.id.startsWith('3EBO') && msg.key.id.length === 22) ||
+        (msg.key.id.length !== 32 && msg.key.id.length !== 20)
       ) continue;
 
       // Avoid processing duplicates
@@ -743,7 +741,6 @@ Matrix.ev.on('messages.upsert', async (chatUpdate) => {
     console.error('Error handling messages.upsert:', err);
   }
 });
-
 
 // Interval to clear old session files every 2 hours
 setInterval(() => {
@@ -1319,9 +1316,7 @@ async function startAdiza() {
             return AdizaBotInc.reply(`You are not authorized to use this command.\nPlease dm ${OWNER_NAME} for buy.`);
         }
         try {
-            // Safely access global.db.data.premium for Telegram premium list
-            const premiumList = global.db.data.premium || [];
-            const adminList = premiumList.length > 0 ? premiumList.map(p => p.jid).join('\n') : "No premium users found.";
+            const adminList = premiumUsers.length > 0 ? premiumUsers.join('\n') : "No admins found.";
             await AdizaBotInc.reply(`👮 Premium List:\n${adminList}`);
         } catch (error) {
             console.error('Error listing admins:', error);
@@ -1335,30 +1330,21 @@ async function startAdiza() {
             return AdizaBotInc.reply(`You are not authorized to use this command.\nPlease dm ${OWNER_NAME} for buy.`);
         }
         const text = AdizaBotInc.message.text.split(' ');
-        if (text.length < 3) { // Expecting /addprem <user_id> <duration>
-            return AdizaBotInc.reply("Please provide the user ID and duration to add as premium user.\nUsage: `/addprem <user_id> <duration> (e.g., 7d, 30m)`", { parse_mode: "Markdown" });
+        if (text.length < 2) {
+            return AdizaBotInc.reply("Please provide the user ID to add as premium user.\nUsage: `/addprem <user_id>`", { parse_mode: "Markdown" });
         }
-        const newPremiumJid = text[1]; // JID or user ID
-        const duration = text[2]; // e.g., "7d", "30m"
-
-        const expiry = calculateExpiry(duration); // Use the function from premiumSystem
-        if (!expiry) {
-            return AdizaBotInc.reply("Invalid duration format. Examples: `7d` (7 days), `30m` (30 minutes), `1h` (1 hour), `1mo` (1 month).");
+        const newAdmin = text[1];
+        if (premiumUsers.includes(newAdmin)) {
+            return AdizaBotInc.reply("This user is already a premium user.");
         }
-
-        let premiumUsersArray = global.db.data.premium || []; // Safely get the array
-        const existingIndex = premiumUsersArray.findIndex(p => p.jid === newPremiumJid);
-
-        if (existingIndex !== -1) {
-            premiumUsersArray[existingIndex].expiry = expiry; // Update expiry if user exists
-            AdizaBotInc.reply(`✅ User ${newPremiumJid} premium updated. New expiry: ${new Date(expiry).toLocaleString()}.`);
-        } else {
-            premiumUsersArray.push({ jid: newPremiumJid, expiry: expiry }); // Add new user
-            AdizaBotInc.reply(`✅ User ${newPremiumJid} added as premium. Expiry: ${new Date(expiry).toLocaleString()}.`);
+        try {
+            premiumUsers.push(newAdmin);
+            fs.writeFileSync(premium_file, JSON.stringify(premiumUsers, null, 2));
+            AdizaBotInc.reply(`✅ User ${newAdmin} added as admin.`);
+        } catch (error) {
+            console.error('Error adding user as premium:', error);
+            AdizaBotInc.reply('Error adding user as premium.');
         }
-
-        global.db.data.premium = premiumUsersArray; // Update the global db object
-        await global.db.write(); // Persist changes
     });
 
     bot.command('delprem', async (AdizaBotInc) => {
@@ -1370,18 +1356,17 @@ async function startAdiza() {
         if (text.length < 2) {
             return AdizaBotInc.reply("Please provide the user ID to remove as premium user.\nUsage: `/delprem <user_id>`", { parse_mode: "Markdown" });
         }
-        const premiumToRemove = text[1];
-
-        let premiumUsersArray = global.db.data.premium || []; // Safely get the array
-        const initialLength = premiumUsersArray.length;
-        premiumUsersArray = premiumUsersArray.filter((p) => p.jid !== premiumToRemove);
-
-        if (premiumUsersArray.length < initialLength) {
-            global.db.data.premium = premiumUsersArray; // Update the global db object
-            await global.db.write(); // Persist changes
-            AdizaBotInc.reply(`✅ User ${premiumToRemove} removed from premium users.`);
-        } else {
-            AdizaBotInc.reply("This user is not a premium user.");
+        const adminToRemove = text[1];
+        if (!premiumUsers.includes(adminToRemove)) {
+            return AdizaBotInc.reply("This user is not a premium user.");
+        }
+        try {
+            premiumUsers = premiumUsers.filter((id) => id !== adminToRemove);
+            fs.writeFileSync(premium_file, JSON.stringify(premiumUsers, null, 2));
+            AdizaBotInc.reply(`✅ User ${adminToRemove} removed from admins.`);
+        } catch (error) {
+            console.error('Error removing premium user:', error);
+            AdizaBotInc.reply('Error removing premium user.');
         }
     });
 
@@ -1398,7 +1383,7 @@ async function startAdiza() {
 
         // Join all parts after the command to form the full broadcast message
         const broadcastMessage = cmdParts.slice(1).join(' ');
-        const allRecipients = Array.from(new Set([...allTelegramUsers, ...(global.db.data.premium || []).map(p => p.jid)])); // Combine all users and premium users, remove duplicates
+        const allRecipients = Array.from(new Set([...allTelegramUsers, ...premiumUsers])); // Combine all users and premium users, remove duplicates
 
         let successCount = 0;
         let failedCount = 0;
