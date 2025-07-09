@@ -80,17 +80,20 @@ function deleteFolderRecursive(folderPath) {
 
 const { Octokit } = require("@octokit/rest");
 
-// Use global.dbToken for GitHub authentication
+// Use a dedicated environment variable for pairing repo authentication
+global.GITHUB_PAIRING_TOKEN = process.env.GITHUB_PAIRING_TOKEN || ""; // <-- Add this line at the top of your file or in settings.js
+
 const GITHUB_PAIRING_REPO = "rentbot-pairing-sessions";
 const GITHUB_PAIRING_OWNER = "Matrix1999"; // Replace with your GitHub username
 const GITHUB_PAIRING_BASEPATH = "pairing";
 
-const octokit = new Octokit({ auth: global.dbToken });
+// Use a dedicated Octokit instance for the pairing repo
+const pairingOctokit = new Octokit({ auth: global.GITHUB_PAIRING_TOKEN });
 
 async function createPairingRepo() {
-    if (!global.dbToken) return;
+    if (!global.GITHUB_PAIRING_TOKEN) return;
     try {
-        await octokit.repos.createForAuthenticatedUser({
+        await pairingOctokit.repos.createForAuthenticatedUser({
             name: GITHUB_PAIRING_REPO,
             private: true,
         });
@@ -113,9 +116,9 @@ function ensureLocalPairingDir() {
 }
 
 async function downloadPairingSessions() {
-    if (!global.dbToken) return;
+    if (!global.GITHUB_PAIRING_TOKEN) return;
     try {
-        const { data: userDirs } = await octokit.repos.getContent({
+        const { data: userDirs } = await pairingOctokit.repos.getContent({
             owner: GITHUB_PAIRING_OWNER,
             repo: GITHUB_PAIRING_REPO,
             path: GITHUB_PAIRING_BASEPATH,
@@ -126,7 +129,7 @@ async function downloadPairingSessions() {
             const localUserDir = path.join(__dirname, "lib", "pairing", userDir.name);
             if (!fs.existsSync(localUserDir)) fs.mkdirSync(localUserDir, { recursive: true });
 
-            const { data: sessionFiles } = await octokit.repos.getContent({
+            const { data: sessionFiles } = await pairingOctokit.repos.getContent({
                 owner: GITHUB_PAIRING_OWNER,
                 repo: GITHUB_PAIRING_REPO,
                 path: `${GITHUB_PAIRING_BASEPATH}/${userDir.name}`,
@@ -149,7 +152,7 @@ async function downloadPairingSessions() {
 }
 
 async function uploadPairingSessions() {
-    if (!global.dbToken) return;
+    if (!global.GITHUB_PAIRING_TOKEN) return;
     try {
         const basePairingDir = path.join(__dirname, "lib", "pairing");
         if (!fs.existsSync(basePairingDir)) return;
@@ -167,7 +170,7 @@ async function uploadPairingSessions() {
 
                 let sha;
                 try {
-                    const { data } = await octokit.repos.getContent({
+                    const { data } = await pairingOctokit.repos.getContent({
                         owner: GITHUB_PAIRING_OWNER,
                         repo: GITHUB_PAIRING_REPO,
                         path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
@@ -177,7 +180,7 @@ async function uploadPairingSessions() {
                     if (err.status !== 404) throw err;
                 }
 
-                await octokit.repos.createOrUpdateFileContents({
+                await pairingOctokit.repos.createOrUpdateFileContents({
                     owner: GITHUB_PAIRING_OWNER,
                     repo: GITHUB_PAIRING_REPO,
                     path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
@@ -202,6 +205,7 @@ async function uploadPairingSessions() {
 })();
 
 // --- GITHUB SYNC ADDITIONS END ---
+
 
 
 // --- PREMIUM CHECK FUNCTION ---
