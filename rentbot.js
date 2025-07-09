@@ -137,8 +137,17 @@ async function downloadPairingSessions() {
 
             for (const file of sessionFiles) {
                 if (file.type !== "file") continue;
-                const content = Buffer.from(file.content, "base64").toString("utf8");
-                fs.writeFileSync(path.join(localUserDir, file.name), content);
+                if (!file.content) {
+                    // Skip files with no content (can happen if file is empty or API returns directory)
+                    console.warn(`[RENTPOT] Skipping file with no content: ${file.name}`);
+                    continue;
+                }
+                try {
+                    const content = Buffer.from(file.content, "base64").toString("utf8");
+                    fs.writeFileSync(path.join(localUserDir, file.name), content);
+                } catch (err) {
+                    console.error(`[RENTPOT] Failed to write file ${file.name}:`, err);
+                }
             }
         }
         console.log("[RENTPOT] Pairing sessions restored from GitHub.");
@@ -166,7 +175,16 @@ async function uploadPairingSessions() {
             const files = await fs.promises.readdir(userPath);
             for (const fileName of files) {
                 const filePath = path.join(userPath, fileName);
-                const content = await fs.promises.readFile(filePath, "utf8");
+
+                // --- Robust: skip if file does not exist ---
+                let content;
+                try {
+                    content = await fs.promises.readFile(filePath, "utf8");
+                } catch (err) {
+                    // File is missing, skip it
+                    console.warn(`[RENTPOT] Skipping missing file during upload: ${filePath}`);
+                    continue;
+                }
 
                 let sha;
                 try {
