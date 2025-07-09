@@ -196,42 +196,6 @@ async function uploadPairingSessions() {
     }
 }
 
-// --- STARTUP INITIALIZATION ---
-(async () => {
-    await createPairingRepo();
-    ensureLocalPairingDir();
-    await downloadPairingSessions();
-    
-    // --- Wait until global.db is loaded and premium data is available ---
-async function waitForPremiumData(retries = 30, delay = 1000) {
-    for (let i = 0; i < retries; i++) {
-        if (global.db && global.db.data && Array.isArray(global.db.data.premium)) return true;
-        await new Promise(res => setTimeout(res, delay));
-    }
-    return false;
-}
-
-const hasPremium = await waitForPremiumData();
-if (hasPremium) {
-    const rentbotUsers = global.db.data.premium.filter(u => u.jid);
-    for (const user of rentbotUsers) {
-        try {
-            if (!global.activeSockets[user.jid]) {
-                startpairing(user.jid);
-                console.log(`[RENTBOT] Started rentbot for premium user: ${user.jid}`);
-            } else {
-                console.log(`[RENTBOT] Rentbot already active for: ${user.jid}`);
-            }
-        } catch (err) {
-            console.error(`[RENTBOT] Failed to start rentbot for ${user.jid}:`, err);
-        }
-    }
-} else {
-    console.warn("[RENTBOT] Premium user list not found or not loaded after waiting!");
-}
-
-    // Now your pairing repo is ready and sessions restored before pairing starts
-})();
 
 // --- GITHUB SYNC ADDITIONS END ---
 
@@ -612,12 +576,17 @@ function smsg(sock, m) { // This function remains named 'smsg' for internal rent
     return m;
 }
 
-module.exports = startpairing;
+module.exports = {
+    startpairing,
+    createPairingRepo,
+    ensureLocalPairingDir,
+    downloadPairingSessions,
+    uploadPairingSessions
+};
 
 let file = require.resolve(__filename);
 fs.watchFile(file, () => {
     fs.unwatchFile(file);
-    // console.log(chalk.redBright(`Update detected in '${__filename}'`)); // Removed
     delete require.cache[file];
     require(file);
 });
