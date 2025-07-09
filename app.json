@@ -55,13 +55,18 @@
       "value": "Africa/Accra",
       "required": false
     },
-   "GITHUB_TOKEN": {
-  "description": "IMPORTANT: Follow these steps to generate your GitHub token correctly(Bot will not save settings without it!). Go to https://github.com/settings/tokens, select 'Tokens (classic)', then tap 'Generate new token' and select 'Generate new token (classic)'. Enter any note, choose 'No expiration', and under 'Select scopes', tick 'repo'. Scroll down, generate the token, and copy it. Paste it here. If using a single token for multiple bots, change the owner number to avoid settings mixups.",
-  "value": "",
-  "required": false
-}
-},
-    "buildpacks": [
+    "GITHUB_TOKEN": {
+      "description": "IMPORTANT: Follow these steps to generate your GitHub token correctly (Bot will not save settings without it!). Go to https://github.com/settings/tokens, select 'Tokens (classic)', then tap 'Generate new token' and select 'Generate new token (classic)'. Enter any note, choose 'No expiration', and under 'Select scopes', tick 'repo'. Scroll down, generate the token, and copy it. Paste it here. If using a single token for multiple bots, change the owner number to avoid settings mixups.",
+      "value": "",
+      "required": false
+    },
+    "GITHUB_PAIRING_TOKEN": {
+      "description": "GitHub token for rentbot-pairing-sessions repo. Generate a classic token with 'repo' scope. You may use the same token as GITHUB_TOKEN if it has access to both repos, or generate a separate one for extra security.",
+      "value": "",
+      "required": false
+    }
+  },
+  "buildpacks": [
     {
       "url": "heroku/nodejs"
     },
