@@ -307,7 +307,7 @@ if (global.db && global.db.data && Array.isArray(global.db.data.premium)) {
 })(); // End of the main async IIFE
 
 if (global.dbToken) {
-    setInterval(global.writeDB, 5 * 60 * 1000); // 5 minutes
+    setInterval(global.writeDB, 30 * 60 * 1000); // 30 minutes
 }
 
 if (global.db) setInterval(async () => {
