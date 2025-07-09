@@ -497,8 +497,8 @@ async function startMatrix() {
   });
 
   
-  setInterval(() => {
-  }, 10000);
+  //setInterval(() => {
+//  }, 10000);
   // --- END ADDED DEBUG LOG ---
 
   // Your existing pairing code logic
