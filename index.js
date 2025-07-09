@@ -40,6 +40,7 @@ const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./li
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
 const { toAudio, toPTT, toVideo } = require('./lib/converter')
 const FileType = require('file-type')
+const startpairing = require('./rentbot'); 
 
 const store = {
   messages: {}, // { [jid]: WebMessageInfo[] }
@@ -571,46 +572,7 @@ await Matrix.sendMessage(Matrix.user.id, {
 
 
 
-        // ====================================\\
-        // Add deleteFolderRecursive and pairing folder cleanup from main.js here
-        const { promisify } = require('util');
-        const readdir = promisify(fs.readdir);
-        // rmdir, stat, unlink are not directly used in the cleanup logic, so can be omitted if not used elsewhere
-        async function deleteFolderRecursive(path) {
-            fs.rm(path, { recursive: true, force: true }, (err) => {
-                if (err) console.error(`Error deleting ${path}:`, err);
-                else console.log(`Deleted folder: ${path}`);
-            });
-        }
-        await sleep(1999); // (already there, but re-confirming for context)
-        fs.readdir('./lib/pairing/', { withFileTypes: true }, async (err, dirents) => {
-            if (err) return console.error(err);
 
-            for (let i = 0; i < dirents.length; i++) {
-                const dirent = dirents[i];
-                const dirPath = `./lib/pairing/${dirent.name}`;
-
-                if (dirent.isDirectory()) {
-                    try {
-                        const files = await readdir(dirPath);
-                        if (files.length === 0) {
-                            // Wait for 1 minute before deleting the folder
-                            await sleep(60000);
-                            await deleteFolderRecursive(dirPath);
-                        } else {
-                            console.log(dirent.name);
-                            // If you need the re-pairing logic, ensure rentbot.js is available
-                            const startpairing = require('./rentbot.js');
-                            await startpairing(dirent.name);
-                            await sleep(200);
-                        }
-                    } catch (err) {
-                        console.error(`Error processing directory ${dirent.name}:`, err);
-                    }
-                }
-            }
-        });
-        // ====================================\\
     }
 
 } catch (err) {
@@ -1469,8 +1431,37 @@ app.listen(port, (err) => {
 (async () => {
     try {
         console.log("Starting WhatsApp bot...");
-        await matrix(); // This starts your main WhatsApp bot logic
+        await matrix(); // This starts your main WhatsApp bot logic (which includes loading DB and main bot)
         console.log("WhatsApp bot started! Starting Telegram bot...");
+
+        // --- NEW BLOCK: Start Rent Bots ---
+        console.log("[ADIZATU] Attempting to start sessions for premium rent bot users...");
+        
+        const premiumUsers = global.db.data.premium || []; // Access the loaded premium users from your DB
+        if (premiumUsers.length === 0) {
+            console.log("[ADIZATU] No premium users found in the database. Skipping rent bot startup.");
+        } else {
+            for (const user of premiumUsers) {
+                const userJid = user.jid;
+                // Double-check if the session folder and creds.json exist locally
+                // `rentbot.js`'s IIFE should have already downloaded them at this point
+                const sessionDir = path.join(__dirname, 'lib', 'pairing', userJid);
+                const credsFile = path.join(sessionDir, 'creds.json');
+
+                if (fs.existsSync(credsFile)) {
+                    console.log(chalk.yellow(`[ADIZATU] Found session for premium user ${userJid}. Attempting to start...`));
+                    await startpairing(userJid); // Call startpairing for each premium user
+                    await sleep(1000); // Small delay to avoid overwhelming the system
+                } else {
+                    console.log(chalk.red(`[ADIZATU] No local session files found for premium user ${userJid}. Skipping connection.`));
+                    // This might happen if downloadPairingSessions failed for this user, or it's a new premium user
+                    // who hasn't paired yet. They will need to pair first.
+                }
+            }
+            console.log("[ADIZATU] Finished attempting to start rent bot sessions.");
+        }
+        // --- END NEW BLOCK ---
+
         await startAdiza(); // This starts the Telegram bot logic
         console.log("All bots launched successfully!");
     } catch (error) {
