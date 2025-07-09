@@ -625,8 +625,9 @@ await Matrix.sendMessage(Matrix.user.id, {
                         } else {
                             console.log(dirent.name);
                             // If you need the re-pairing logic, ensure rentbot.js is available
-                            const startpairing = require('./rentbot.js');
-                            await startpairing(dirent.name);
+                            const rentbot = require('./rentbot.js');
+                            await rentbot.startpairing(dirent.name);
+
                             await sleep(200);
                         }
                     } catch (err) {
