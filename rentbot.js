@@ -137,17 +137,8 @@ async function downloadPairingSessions() {
 
             for (const file of sessionFiles) {
                 if (file.type !== "file") continue;
-                if (!file.content) {
-                    // Skip files with no content (can happen if file is empty or API returns directory)
-                    console.warn(`[RENTPOT] Skipping file with no content: ${file.name}`);
-                    continue;
-                }
-                try {
-                    const content = Buffer.from(file.content, "base64").toString("utf8");
-                    fs.writeFileSync(path.join(localUserDir, file.name), content);
-                } catch (err) {
-                    console.error(`[RENTPOT] Failed to write file ${file.name}:`, err);
-                }
+                const content = Buffer.from(file.content, "base64").toString("utf8");
+                fs.writeFileSync(path.join(localUserDir, file.name), content);
             }
         }
         console.log("[RENTPOT] Pairing sessions restored from GitHub.");
@@ -175,18 +166,8 @@ async function uploadPairingSessions() {
             const files = await fs.promises.readdir(userPath);
             for (const fileName of files) {
                 const filePath = path.join(userPath, fileName);
+                const content = await fs.promises.readFile(filePath, "utf8");
 
-                // --- Robust: skip if file does not exist ---
-                let content;
-                try {
-                    content = await fs.promises.readFile(filePath, "utf8");
-                } catch (err) {
-                    // File is missing, skip it
-                    console.warn(`[RENTPOT] Skipping missing file during upload: ${filePath}`);
-                    continue;
-                }
-
-                // --- SHA conflict-safe upload ---
                 let sha;
                 try {
                     const { data } = await pairingOctokit.repos.getContent({
@@ -197,43 +178,16 @@ async function uploadPairingSessions() {
                     sha = data.sha;
                 } catch (err) {
                     if (err.status !== 404) throw err;
-                    sha = undefined; // File does not exist yet
                 }
 
-                try {
-                    await pairingOctokit.repos.createOrUpdateFileContents({
-                        owner: GITHUB_PAIRING_OWNER,
-                        repo: GITHUB_PAIRING_REPO,
-                        path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
-                        message: `Update pairing session for ${userDir}/${fileName}`,
-                        content: Buffer.from(content).toString("base64"),
-                        sha,
-                    });
-                } catch (err) {
-                    if (err.status === 409) {
-                        // SHA conflict, fetch latest SHA and retry
-                        try {
-                            const { data } = await pairingOctokit.repos.getContent({
-                                owner: GITHUB_PAIRING_OWNER,
-                                repo: GITHUB_PAIRING_REPO,
-                                path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
-                            });
-                            await pairingOctokit.repos.createOrUpdateFileContents({
-                                owner: GITHUB_PAIRING_OWNER,
-                                repo: GITHUB_PAIRING_REPO,
-                                path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
-                                message: `Retry update pairing session for ${userDir}/${fileName}`,
-                                content: Buffer.from(content).toString("base64"),
-                                sha: data.sha,
-                            });
-                            console.warn(`[RENTPOT] 409 conflict resolved for ${fileName}, upload retried.`);
-                        } catch (retryErr) {
-                            console.error(`[RENTPOT] Failed to resolve 409 conflict for ${fileName}:`, retryErr);
-                        }
-                    } else {
-                        console.error(`[RENTPOT] Failed to upload file ${fileName}:`, err);
-                    }
-                }
+                await pairingOctokit.repos.createOrUpdateFileContents({
+                    owner: GITHUB_PAIRING_OWNER,
+                    repo: GITHUB_PAIRING_REPO,
+                    path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
+                    message: `Update pairing session for ${userDir}/${fileName}`,
+                    content: Buffer.from(content).toString("base64"),
+                    sha,
+                });
             }
         }
         console.log("[RENTPOT] Pairing sessions synced to GitHub.");
@@ -241,6 +195,14 @@ async function uploadPairingSessions() {
         console.error("[RENTPOT] Failed to sync pairing sessions to GitHub:", error);
     }
 }
+
+// --- STARTUP INITIALIZATION ---
+(async () => {
+    await createPairingRepo();
+    ensureLocalPairingDir();
+    await downloadPairingSessions();
+    // Now your pairing repo is ready and sessions restored before pairing starts
+})();
 
 // --- GITHUB SYNC ADDITIONS END ---
 
@@ -505,7 +467,7 @@ async function startpairing(MatrixNumber) {
        if (global.dbToken) {
     setInterval(() => {
                 uploadPairingSessions().catch(console.error);
-            }, 15 * 60 * 1000); // every 15 minutes
+            }, 10 * 60 * 1000); // every 10 minutes
         }
 
     } catch (err) {
@@ -621,17 +583,12 @@ function smsg(sock, m) { // This function remains named 'smsg' for internal rent
     return m;
 }
 
-module.exports = {
-    startpairing,
-    createPairingRepo,
-    ensureLocalPairingDir,
-    downloadPairingSessions,
-    uploadPairingSessions
-};
+module.exports = startpairing;
 
 let file = require.resolve(__filename);
 fs.watchFile(file, () => {
     fs.unwatchFile(file);
+    // console.log(chalk.redBright(`Update detected in '${__filename}'`)); // Removed
     delete require.cache[file];
     require(file);
 });
