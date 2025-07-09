@@ -1804,6 +1804,7 @@ ${requestMsg}
 
     db.data.premium = premiumUsers;
     await db.write();
+    await global.writeDB(); // <--- ADD THIS LINE
 
     // --- Session recovery logic ---
     let startpairing;
@@ -1819,7 +1820,6 @@ ${requestMsg}
     const isSocketActive = global.activeSockets && global.activeSockets[targetJid];
 
     if (fs.existsSync(credsFile) && typeof startpairing === 'function' && !isSocketActive) {
-      // Session exists but is not active, recover it (no new code needed)
       try {
         startpairing(targetJid);
         console.log(`[ADDPREM] Recovered WhatsApp session for ${targetJid} after premium activation.`);
@@ -1827,11 +1827,9 @@ ${requestMsg}
         console.error(`[ADDPREM] Failed to recover WhatsApp session for ${targetJid}:`, err);
       }
     } else if (!fs.existsSync(credsFile)) {
-      // No session files, user must pair again
       console.warn(`[ADDPREM] creds.json not found for ${targetJid}. User must pair again.`);
       reply(`⚠️ User @${username} must pair again using /pair command.`, { mentions: [targetJid] });
     } else if (isSocketActive) {
-      // Already active, do nothing
       console.log(`[ADDPREM] Socket already active for ${targetJid}, not starting a new one.`);
     }
 
@@ -1900,6 +1898,7 @@ ${requestMsg}
     premiumUsers.splice(index, 1);
     db.data.premium = premiumUsers;
     await db.write();
+    await global.writeDB(); // <-- Instantly sync to GitHub
 
     reply(`✅ Removed premium status from user ${numberToRemove.split('@')[0]}.`);
 
@@ -1935,7 +1934,8 @@ ${requestMsg}
       console.warn(`[DELPREM] Could not notify user ${numberToRemove} about premium removal: ${err.message}`);
     }
   }
-},  {
+},
+ {
   command: ['activesockets'],
   operate: async ({ Matrix, m, isCreator, reply }) => {
     if (!isCreator) return reply("❌ Only the owner can use this command.");
