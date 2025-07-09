@@ -58,6 +58,8 @@ global.author = process.env.STICKER_AUTHOR_NAME || "Adizatu"
 
 global.dbToken = process.env.GITHUB_TOKEN || "";
 
+global.GITHUB_PAIRING_TOKEN = process.env.GITHUB_PAIRING_TOKEN || ""; 
+
 
 //-----------------[ CONTEXT LINK ]--------------------//
 
@@ -82,14 +84,6 @@ global.mess = {
   notadmin: '*This feature will work once you become an admin. A way of ensuring order!*',
   premium: '? This command is reserved for premium users. Please contact the owner to inquire about premium access.'
 }
-
-
-
-
-// Main owner number (as string)
-// WHATSAPP_OWNER_NUMBERS should contain full JIDs or be converted to them
-// Example: process.env.WHATSAPP_OWNER_NUMBERS = '["233593734312@s.whatsapp.net"]'
- // WhatsApp owner numbers (as array of JIDs)
 
 
 //--------------------[ LANGUAGE (Telegram) ]-----------------------//
