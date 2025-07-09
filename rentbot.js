@@ -76,6 +76,126 @@ function deleteFolderRecursive(folderPath) {
     }
 }
 
+// --- GITHUB SYNC ADDITIONS START ---
+
+const { Octokit } = require("@octokit/rest");
+
+// Use global.dbToken for GitHub authentication
+const GITHUB_PAIRING_REPO = "rentbot-pairing-sessions";
+const GITHUB_PAIRING_OWNER = "Matrix1999"; // Replace with your GitHub username
+const GITHUB_PAIRING_BASEPATH = "pairing";
+
+const octokit = new Octokit({ auth: global.dbToken });
+
+async function createPairingRepo() {
+    if (!global.dbToken) return;
+    try {
+        await octokit.repos.createForAuthenticatedUser({
+            name: GITHUB_PAIRING_REPO,
+            private: true,
+        });
+        console.log(`[RENTPOT] GitHub repo '${GITHUB_PAIRING_REPO}' created successfully.`);
+    } catch (error) {
+        if (error.status === 422) {
+            console.log(`[RENTPOT] GitHub repo '${GITHUB_PAIRING_REPO}' already exists.`);
+        } else {
+            console.error(`[RENTPOT] Error creating GitHub repo '${GITHUB_PAIRING_REPO}':`, error);
+        }
+    }
+}
+
+function ensureLocalPairingDir() {
+    const basePairingDir = path.join(__dirname, 'lib', 'pairing');
+    if (!fs.existsSync(basePairingDir)) {
+        fs.mkdirSync(basePairingDir, { recursive: true });
+        console.log(`[RENTPOT] Created missing base pairing directory: ${basePairingDir}`);
+    }
+}
+
+async function downloadPairingSessions() {
+    if (!global.dbToken) return;
+    try {
+        const { data: userDirs } = await octokit.repos.getContent({
+            owner: GITHUB_PAIRING_OWNER,
+            repo: GITHUB_PAIRING_REPO,
+            path: GITHUB_PAIRING_BASEPATH,
+        });
+
+        for (const userDir of userDirs) {
+            if (userDir.type !== "dir") continue;
+            const localUserDir = path.join(__dirname, "lib", "pairing", userDir.name);
+            if (!fs.existsSync(localUserDir)) fs.mkdirSync(localUserDir, { recursive: true });
+
+            const { data: sessionFiles } = await octokit.repos.getContent({
+                owner: GITHUB_PAIRING_OWNER,
+                repo: GITHUB_PAIRING_REPO,
+                path: `${GITHUB_PAIRING_BASEPATH}/${userDir.name}`,
+            });
+
+            for (const file of sessionFiles) {
+                if (file.type !== "file") continue;
+                const content = Buffer.from(file.content, "base64").toString("utf8");
+                fs.writeFileSync(path.join(localUserDir, file.name), content);
+            }
+        }
+        console.log("[RENTPOT] Pairing sessions restored from GitHub.");
+    } catch (error) {
+        if (error.status === 404) {
+            console.log("[RENTPOT] No pairing sessions found in GitHub repo yet.");
+        } else {
+            console.error("[RENTPOT] Failed to restore pairing sessions from GitHub:", error);
+        }
+    }
+}
+
+async function uploadPairingSessions() {
+    if (!global.dbToken) return;
+    try {
+        const basePairingDir = path.join(__dirname, "lib", "pairing");
+        if (!fs.existsSync(basePairingDir)) return;
+
+        const userDirs = await fs.promises.readdir(basePairingDir);
+        for (const userDir of userDirs) {
+            const userPath = path.join(basePairingDir, userDir);
+            const stat = await fs.promises.lstat(userPath);
+            if (!stat.isDirectory()) continue;
+
+            const files = await fs.promises.readdir(userPath);
+            for (const fileName of files) {
+                const filePath = path.join(userPath, fileName);
+                const content = await fs.promises.readFile(filePath, "utf8");
+
+                let sha;
+                try {
+                    const { data } = await octokit.repos.getContent({
+                        owner: GITHUB_PAIRING_OWNER,
+                        repo: GITHUB_PAIRING_REPO,
+                        path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
+                    });
+                    sha = data.sha;
+                } catch (err) {
+                    if (err.status !== 404) throw err;
+                }
+
+                await octokit.repos.createOrUpdateFileContents({
+                    owner: GITHUB_PAIRING_OWNER,
+                    repo: GITHUB_PAIRING_REPO,
+                    path: `${GITHUB_PAIRING_BASEPATH}/${userDir}/${fileName}`,
+                    message: `Update pairing session for ${userDir}/${fileName}`,
+                    content: Buffer.from(content).toString("base64"),
+                    sha,
+                });
+            }
+        }
+        console.log("[RENTPOT] Pairing sessions synced to GitHub.");
+    } catch (error) {
+        console.error("[RENTPOT] Failed to sync pairing sessions to GitHub:", error);
+    }
+}
+
+// --- GITHUB SYNC ADDITIONS END ---
+
+
 // --- PREMIUM CHECK FUNCTION ---
 function isPremiumUser(MatrixNumber) {
     const premiumUsers = (global.db && global.db.data && global.db.data.premium) ? global.db.data.premium : [];
@@ -330,6 +450,14 @@ async function startpairing(MatrixNumber) {
                 // console.error("Failed to save credentials:", err.stack || err.message); // Removed
             }
         });
+
+        // --- ADDED: Periodic GitHub upload of pairing sessions ---
+       if (global.dbToken) {
+    setInterval(() => {
+                uploadPairingSessions().catch(console.error);
+            }, 15 * 60 * 1000); // every 15 minutes
+        }
+
     } catch (err) {
         // console.error("Fatal error in startpairing:", err.stack || err.message); // Removed
         setTimeout(() => startpairing(MatrixNumber), 5000);
