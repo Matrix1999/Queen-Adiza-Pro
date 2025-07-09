@@ -18,7 +18,7 @@ const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
 
 const extendWASocket = require('./lib/matrixUtils'); 
-
+const { startPremiumWatcher } = require('./lib/premiumSystem'); 
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
 const { color } = require('./lib/color')
@@ -265,7 +265,8 @@ global.writeDB = async function () {
         console.log(`[ADIZATU] Owner number normalized to: ${global.ownernumber}`);
     }
 
-
+    // --- NEW: Require premiumSystem HERE, after DB is loaded ---
+//    require('./lib/premiumSystem');
 
     Object.defineProperty(global, "mode", {
       get() { return global.db.data.settings.mode || "public" },
@@ -466,8 +467,7 @@ async function startMatrix() {
   
   global.mainMatrix = Matrix;
   
-  require('./lib/premiumSystem'); 
-
+  
   // Extend the Matrix object with your custom utilities
   extendWASocket(Matrix);
 
@@ -488,7 +488,9 @@ async function startMatrix() {
     }
   });
 
+ startPremiumWatcher(); 
   
+    
   setInterval(() => {
   }, 10000);
   // --- END ADDED DEBUG LOG ---
