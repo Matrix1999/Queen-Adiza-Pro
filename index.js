@@ -1,4 +1,3 @@
-
 require('events').EventEmitter.defaultMaxListeners = 50;
 require('./settings'); 
 const {
@@ -79,8 +78,6 @@ const localDb = path.join(__dirname, "src", "database.json");
 
 global.db = new Low(new JSONFile(localDb));
 
-// ... (lines above global.loadDatabase)
-
 global.loadDatabase = async function loadDatabase() {
     if (global.db.READ) return new Promise(resolve => setInterval(() => {
         if (!global.db.READ) {
@@ -110,12 +107,10 @@ global.loadDatabase = async function loadDatabase() {
 
     global.db.data ??= {}; // Ensure it's an object if null
     
-    // --- START MODIFICATION ---
     global.db.data = {
       chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
       users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
       settings: global.db.data.settings && Object.keys(global.db.data.settings).length ? global.db.data.settings : {
-    
         autobio: false,
         anticall: false,
         autotype: false,
@@ -138,10 +133,42 @@ global.loadDatabase = async function loadDatabase() {
       sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
       premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
 };
-    // --- END MODIFICATION ---
-
     global.db.chain = _.chain(global.db.data);
     await global.db.write();
+};
+
+
+// Define global.writeDB outside of readDB so it's always accessible
+global.writeDB = async function () {
+    if (!global.dbToken) return;
+    try {
+        await global.db.write(); // Write localdb data first
+
+        const octokit = await getOctokit();
+        const owner = await getOwner(octokit);
+        const content = fs.readFileSync(localDb, "utf-8"); // Read from localDb
+
+        let sha;
+        try {
+            const { data } = await octokit.repos.getContent({ owner, repo: dbName, path: dbPath });
+            sha = data.sha;
+        } catch (error) {
+            if (error.status !== 404) throw error;
+        }
+
+        await octokit.repos.createOrUpdateFileContents({
+            owner,
+            repo: dbName,
+            path: dbPath,
+            message: `Updated database`,
+            content: Buffer.from(content).toString("base64"),
+            sha,
+        });
+
+        console.log("[MATRIX-X] Successfully synced database.");
+    } catch (error) {
+        console.error("❌ Error writing database to GitHub:", error);
+    }
 };
 
 
@@ -164,7 +191,7 @@ async function createDB() {
         await octokit.repos.createForAuthenticatedUser({ name: dbName, private: true });
         console.log("[MATRIX-X] Database created successfully.");
     } catch (error) {
-        if (error.status === 422) {
+        if (error.status === 422) { // Repository already exists
             return;
         } else {
             console.error("❌ Error creating repository database:", error);
@@ -182,8 +209,10 @@ async function readDB() {
         const content = Buffer.from(data.content, "base64").toString("utf-8");
 
         if (!content || content.trim() === "{}") {
+            // If content is empty or just an empty object, no need to merge, just write defaults if needed
             return;
         }
+        
         const defaultSettings = {
             prefix: ".",
             mode: "public",
@@ -205,61 +234,32 @@ async function readDB() {
         };
 
         try {
-            await global.db.read();
-            const previousData = global.db.data || {};
+            await global.db.read(); // Read existing local data
+            const githubData = JSON.parse(content); // Parse content from GitHub
 
+            // Merge data from GitHub into localDb, prioritizing GitHub for sync
             global.db.data = {
-                chats: previousData.chats || {},
-                settings: { ...defaultSettings, ...(previousData.settings || {}) },
-                blacklist: previousData.blacklist || { blacklisted_numbers: [] },
-                sudo: Array.isArray(previousData.sudo) ? previousData.sudo : []
+                chats: githubData.chats || {},
+                users: githubData.users || {}, // Ensure users from GitHub are loaded
+                settings: { ...defaultSettings, ...(githubData.settings || {}) },
+                blacklist: githubData.blacklist || { blacklisted_numbers: [] },
+                sudo: Array.isArray(githubData.sudo) ? githubData.sudo : [],
+                premium: Array.isArray(githubData.premium) ? githubData.premium : []
             };
 
             global.db.chain = _.chain(global.db.data);
-            await global.db.write();
+            await global.db.write(); // Write the merged data back to local DB
 
-            fs.writeFileSync(localDb, content);
-            console.log("[MATRIX-X] Synced local database successfully.");
+            fs.writeFileSync(localDb, content); // Overwrite local file with GitHub content
+            console.log("[MATRIX-X] Synced local database successfully from GitHub.");
         } catch (error) {
             if (error.status === 404) {
-                console.log("[MATRIX-X] Creating database....");
-                await writeDB();
+                console.log("[MATRIX-X] Database file not found on GitHub. Creating it...");
+                await global.writeDB(); // Now this call to global.writeDB is correct
             } else {
                 console.error("❌ Error reading database from GitHub:", error);
             }
         }
-
-        global.writeDB = async function () {
-            if (!global.dbToken) return;
-            try {
-                await global.db.write();
-
-                const octokit = await getOctokit();
-                const owner = await getOwner(octokit);
-                const content = fs.readFileSync(localDb, "utf-8");
-                let sha;
-
-                try {
-                    const { data } = await octokit.repos.getContent({ owner, repo: dbName, path: dbPath });
-                    sha = data.sha;
-                } catch (error) {
-                    if (error.status !== 404) throw error;
-                }
-
-                await octokit.repos.createOrUpdateFileContents({
-                    owner,
-                    repo: dbName,
-                    path: dbPath,
-                    message: `Updated database`,
-                    content: Buffer.from(content).toString("base64"),
-                    sha,
-                });
-
-                console.log("[MATRIX-X] Successfully synced database.");
-            } catch (error) {
-                console.error("❌ Error writing database to GitHub:", error);
-            }
-        };
 
     } catch (error) {
         console.error("❌ Error in readDB:", error);
@@ -282,21 +282,21 @@ async function readDB() {
 
     // Now define modeStatus
     global.settings = global.db.data.settings;
-  global.modeStatus = global.settings.mode === "public" ? "Public" : global.settings.mode === "private" ? "Private" : global.settings.mode === "group" ? "Group Only" : global.settings.mode === "pm" ? "PM Only" : "Unknown";
+    global.modeStatus = global.settings.mode === "public" ? "Public" : global.settings.mode === "private" ? "Private" : global.settings.mode === "group" ? "Group Only" : global.settings.mode === "pm" ? "PM Only" : "Unknown";
 
-//sudo//
-  global.db.data.settings.sudo = global.db.data.settings.sudo || [
-  ...(Array.isArray(global.sudo) ? global.sudo : [])
-    .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
-];
-await global.db.write();
+    //sudo//
+    global.db.data.settings.sudo = global.db.data.settings.sudo || [
+      ...(Array.isArray(global.sudo) ? global.sudo : [])
+        .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
+    ];
+    await global.db.write();
 
     // ...rest of your startup logic (startMatrix, etc)...
 })();
 
 
 if (global.dbToken) {
-    setInterval(writeDB, 30 * 60 * 1000);
+    setInterval(global.writeDB, 30 * 60 * 1000); // Correctly calls global.writeDB
 }
 
 if (global.db) setInterval(async () => {
@@ -495,11 +495,7 @@ async function startMatrix() {
     }
   });
 
-  
-  setInterval(() => {
-  }, 10000);
-  // --- END ADDED DEBUG LOG ---
-
+  // Removed the problematic empty setInterval from here
   // Your existing pairing code logic
   if (usePairingCode && !Matrix.authState.creds.registered) {
     if (useMobile) throw new Error('Cannot use pairing code with mobile API');
@@ -589,7 +585,7 @@ await Matrix.sendMessage(Matrix.user.id, {
 
     
     "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" +
-    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMM YYYY')}\n` +
+    `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMMYYYY')}\n` +
     `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` + 
     `╰───━━━༺◈༻━━━───╯\n` 
 
@@ -652,7 +648,7 @@ Matrix.ev.on('creds.update', saveCreds);
 
 // appenTextMessage function definition for poll updates
 const appenTextMessage = async (m, MatrixInstance, text, chatUpdate) => { // Renamed AdizaBotInc to MatrixInstance
-    let messages = await generateWAMessage(
+    let messages = await generateWAMessageFromContent(
       m.key.remoteJid,
       {
         text: text
