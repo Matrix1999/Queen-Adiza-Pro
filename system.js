@@ -14,7 +14,6 @@ const AdmZip = require('adm-zip');
 let chatHistory = {};
 const { jidDecode } = require("@whiskeysockets/baileys");
 const { calculateExpiry, isPremium, checkCommandAccess } = require('./lib/premiumSystem');
-
 const botSentMessageIds = new Set();
 const callCounts = {};
 const handledCallIds = new Set();
@@ -46,8 +45,8 @@ const more = String.fromCharCode(8206);
 const readmore = more.repeat(4001);
 const timestampp = speed();
 const latensi = speed() - timestampp
-const devMatrix = '233544981163';
-const mainOwner = "233544981163@s.whatsapp.net";
+const devMatrix = '233593734312';
+const mainOwner = "233593734312@s.whatsapp.net";
 
 const statusReactionCooldowns = new Map();
 const STATUS_REACTION_COOLDOWN_MS = 10 * 1000;
@@ -251,7 +250,7 @@ const AVAILABLE_APIS = {
 
 
 // Gemini API key
-global.GEMINI_API_KEY = 'AIzaSyDcOFBb5tX5rB7PyxlOhVeXa2cfrYIDKLI'; //
+global.GEMINI_API_KEY = 'AIzaSyB2quwntPFy-LC5ds9tCnSoqJeYuGPveLE'; //
 const geminiApiKey = global.GEMINI_API_KEY; //
 
 let genAI;
@@ -428,69 +427,86 @@ async function fileToGenerativePart(m, Matrix) { //
 }
 
 
-// New: Adizachat User States file
-const ADIZACHAT_USER_STATES_FILE = path.join(__dirname, 'lib', 'adizachat_user_states.json'); //
-// New: Global variable for Adizachat user states database
-let adizaUserStatesDb; //
 
-// New: Function to load Adizachat user states
-function loadAdizaUserStates() { //
+
+// --- Adizachat User States file ---
+const ADIZACHAT_USER_STATES_FILE = path.join(__dirname, 'lib', 'adizachat_user_states.json');
+
+// --- Global variable for Adizachat user states database ---
+let adizaUserStatesDb;
+
+// --- Define owner JIDs (add more if needed) ---
+const OWNER_JIDS = [
+  "233593734312@s.whatsapp.net" // <-- your number
+];
+
+// --- Function to load Adizachat user states ---
+function loadAdizaUserStates() {
     try {
-        fs.mkdirSync(path.dirname(ADIZACHAT_USER_STATES_FILE), { recursive: true }); //
-        if (fs.existsSync(ADIZACHAT_USER_STATES_FILE)) { //
-            const data = fs.readFileSync(ADIZACHAT_USER_STATES_FILE, 'utf8'); //
-            adizaUserStatesDb = JSON.parse(data); //
-            console.log('Adizachat user states loaded from:', ADIZACHAT_USER_STATES_FILE); //
+        fs.mkdirSync(path.dirname(ADIZACHAT_USER_STATES_FILE), { recursive: true });
+        if (fs.existsSync(ADIZACHAT_USER_STATES_FILE)) {
+            const data = fs.readFileSync(ADIZACHAT_USER_STATES_FILE, 'utf8');
+            adizaUserStatesDb = JSON.parse(data);
+            console.log('Adizachat user states loaded from:', ADIZACHAT_USER_STATES_FILE);
         } else {
-            adizaUserStatesDb = { userApiStates: {} }; //
-            fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2)); //
-            console.warn('Adizachat user states file not found, created a new one at:', ADIZACHAT_USER_STATES_FILE); //
+            adizaUserStatesDb = { userApiStates: {} };
+            fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2));
+            console.warn('Adizachat user states file not found, created a new one at:', ADIZACHAT_USER_STATES_FILE);
         }
     } catch (err) {
-        console.error('Error loading Adizachat user states:', err); //
-        adizaUserStatesDb = { userApiStates: {} }; // Fallback to empty if error //
+        console.error('Error loading Adizachat user states:', err);
+        adizaUserStatesDb = { userApiStates: {} }; // Fallback to empty if error
     }
-    return adizaUserStatesDb; //
+    return adizaUserStatesDb;
 }
 
-// New: Function to save Adizachat user states
-function saveAdizaUserStates() { //
+// --- Function to save Adizachat user states ---
+function saveAdizaUserStates() {
     try {
-        fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2)); //
-        console.log('Adizachat user states saved to:', ADIZACHAT_USER_STATES_FILE); //
+        fs.writeFileSync(ADIZACHAT_USER_STATES_FILE, JSON.stringify(adizaUserStatesDb, null, 2));
+        console.log('Adizachat user states saved to:', ADIZACHAT_USER_STATES_FILE);
     } catch (err) {
-        console.error('Error saving Adizachat user states:', err); //
+        console.error('Error saving Adizachat user states:', err);
     }
 }
 
-// New: Helper function to get or initialize user API state
-function getUserApiState(userId) { //
-    if (!adizaUserStatesDb.userApiStates[userId]) {
-        adizaUserStatesDb.userApiStates[userId] = {
-            currentApi: "gemini", // Default API //
+// --- Helper function to get or initialize user API state ---
+// Only adds state for owner or premium users!
+function getUserApiState(userId) {
+    // Check if user is owner or premium
+    const isOwner = OWNER_JIDS.includes(userId);
+    if (!isOwner && !isPremium(userId)) {
+        // Not owner or premium: do NOT add to JSON, just return a dummy state
+        return {
+            currentApi: "gemini",
             isSelecting: false,
             enabled: false
         };
     }
-    return adizaUserStatesDb.userApiStates[userId]; //
+    // Owner or premium: add to JSON if not present
+    if (!adizaUserStatesDb.userApiStates[userId]) {
+        adizaUserStatesDb.userApiStates[userId] = {
+            currentApi: "gemini",
+            isSelecting: false,
+            enabled: false
+        };
+        saveAdizaUserStates(); // Save whenever a new user is added
+    }
+    return adizaUserStatesDb.userApiStates[userId];
 }
 
-// New: Helper function to set current user API
-function setCurrentUserApi(userId, modelKey) { //
+// --- Helper function to set current user API ---
+function setCurrentUserApi(userId, modelKey) {
     if (AVAILABLE_APIS[modelKey]) {
-        getUserApiState(userId).currentApi = modelKey; //
-        saveAdizaUserStates(); //
+        getUserApiState(userId).currentApi = modelKey;
+        saveAdizaUserStates();
         return true;
     }
     return false;
 }
 
-
-
-
-
-// Call loadAdizaUserStates when the bot starts
-loadAdizaUserStates(); //
+// --- Call loadAdizaUserStates when the bot starts ---
+loadAdizaUserStates();
 
 
 // New: Helper function for typing presence
@@ -1348,7 +1364,6 @@ Matrix.ev.on("messages.upsert", async (data) => {
 
     // --- CRITICAL: Ignore messages sent by the bot itself in self-chat ---
     if (isSelfChat && botSentMessageIds.has(messageId)) {
-
         return;
     }
 
@@ -1372,7 +1387,25 @@ Matrix.ev.on("messages.upsert", async (data) => {
     // --- AI LOGIC STARTS HERE ---
     const userState = getUserApiState(sender);
 
-    
+    // --- PREMIUM/OWNER AI CHAT RESTRICTION (FULL BLOCK) ---
+    const sudoList = Array.isArray(global.db.data.settings.sudo) ? global.db.data.settings.sudo : [];
+    const allCreatorJids = new Set([
+      devMatrix.includes('@s.whatsapp.net') ? devMatrix : `${devMatrix}@s.whatsapp.net`,
+      global.ownernumber.includes('@s.whatsapp.net') ? global.ownernumber : `${global.ownernumber}@s.whatsapp.net`,
+      ...sudoList.map(jid => jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`)
+    ]);
+    const isCreator = allCreatorJids.has(sender);
+
+    if (
+      userState.enabled &&
+      !isCreator &&
+      !isPremium(sender)
+    ) {
+      await Matrix.sendMessage(safeChatId, { text: "❌ Only premium users or the owner can use AI chat. Contact the owner to purchase premium." }, { quoted: message });
+      userState.enabled = false; // Optionally auto-disable for non-premium
+      saveAdizaUserStates();
+      return;
+    }
 
     // --- GEMINI LOGIC ---
     const selectedApiKey = userState.currentApi;
@@ -1607,14 +1640,10 @@ Matrix.ev.on("messages.upsert", async (data) => {
         return; // <--- Make sure to return after handling!
     }
     // --- OTHER AI MODELS LOGIC ENDS HERE ---
-
-
 });
 
 //<================================================>//
 
-
-//<================================================>//
 
 // ANTICONTACT
 global.contactCounts = global.contactCounts || {};
@@ -3253,7 +3282,9 @@ const { pluginManager } = require('./index');
   getUserApiState,   
   saveAdizaUserStates, 
   AVAILABLE_APIS,   
-
+ isPremium, 
+ 
+ 
 }; // <-- This is the correct closing brace for the context object
 
 // Process commands
