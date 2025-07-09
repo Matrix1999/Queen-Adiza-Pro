@@ -8,21 +8,22 @@ const {
 const {
     simple
 } = require("./lib/myfunc"); 
-global.activeSockets = global.activeSockets || {}; 
+global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
 const fs = require("fs");
-const path = require('path')
 const os = require('os');
 const speed = require('performance-now');
 const axios = require("axios");
 const chalk = require('chalk');
 const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
+
 const extendWASocket = require('./lib/matrixUtils'); 
 
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
 const { color } = require('./lib/color')
 const pino = require("pino");
+const path = require('path')
 const NodeCache = require("node-cache");
 const msgRetryCounterCache = new NodeCache();
 const fetch = require("node-fetch")
@@ -242,50 +243,8 @@ global.writeDB = async function () {
         console.log(`[ADIZATU] Owner number normalized to: ${global.ownernumber}`);
     }
 
-// --- NEW: Require premiumSystem HERE, after DB is loaded ---
-require('./lib/premiumSystem');
-
-// --- RENTBOT AUTO-START: Ensures rentbot sessions come online on restart ---
-const rentbot = require('./rentbot');
-await rentbot.createPairingRepo();
-rentbot.ensureLocalPairingDir();
-await rentbot.downloadPairingSessions(); // <--- This must finish first!
-
-if (global.db && global.db.data && Array.isArray(global.db.data.premium)) {
-    const rentbotUsers = global.db.data.premium.filter(u => u.jid);
-
-    // === DEBUG BLOCK: Check session files before starting rentbots ===
-    
-    for (const user of rentbotUsers) {
-        const credsPath = path.join(__dirname, 'lib', 'pairing', user.jid, 'creds.json');
-        console.log(`[DEBUG] Session file for ${user.jid}: ${fs.existsSync(credsPath) ? 'FOUND' : 'NOT FOUND'}`);
-        if (fs.existsSync(credsPath)) {
-            const size = fs.statSync(credsPath).size;
-            console.log(`[DEBUG] creds.json size for ${user.jid}: ${size} bytes`);
-        }
-    }
-    // === END DEBUG BLOCK ===
-
-    console.log(`[RENTPOT] Found ${rentbotUsers.length} premium users to start rentbots for.`);
-    for (const user of rentbotUsers) {
-        try {
-            if (typeof rentbot.startpairing === 'function') {
-                await rentbot.startpairing(user.jid);
-                console.log(`[RENTPOT] Successfully initiated rentbot for premium user: ${user.jid}`);
-            } else {
-                console.error(`[RENTPOT] Error: 'startpairing' function not exported from rentbot.js, cannot start rentbot for ${user.jid}.`);
-            }
-        } catch (err) {
-            console.error(`[RENTPOT] Failed to start rentbot for ${user.jid}:`, err);
-        }
-    }
-} else {
-    console.warn("[RENTPOT] No premium user data found to start rentbots. Ensure global.db is loaded correctly.");
-}
-
-// --- END RENTBOT AUTO-START BLOCK ---
-
-    
+    // --- NEW: Require premiumSystem HERE, after DB is loaded ---
+    require('./lib/premiumSystem');
 
     Object.defineProperty(global, "mode", {
       get() { return global.db.data.settings.mode || "public" },
@@ -307,7 +266,7 @@ if (global.db && global.db.data && Array.isArray(global.db.data.premium)) {
 })(); // End of the main async IIFE
 
 if (global.dbToken) {
-    setInterval(global.writeDB, 30 * 60 * 1000); // 30 minutes
+    setInterval(global.writeDB, 15 * 60 * 1000);
 }
 
 if (global.db) setInterval(async () => {
@@ -641,9 +600,8 @@ await Matrix.sendMessage(Matrix.user.id, {
                         } else {
                             console.log(dirent.name);
                             // If you need the re-pairing logic, ensure rentbot.js is available
-                            const rentbot = require('./rentbot.js');
-                            await rentbot.startpairing(dirent.name);
-
+                            const startpairing = require('./rentbot.js');
+                            await startpairing(dirent.name);
                             await sleep(200);
                         }
                     } catch (err) {
