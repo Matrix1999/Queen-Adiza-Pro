@@ -193,6 +193,14 @@ async function uploadPairingSessions() {
     }
 }
 
+// --- STARTUP INITIALIZATION ---
+(async () => {
+    await createPairingRepo();
+    ensureLocalPairingDir();
+    await downloadPairingSessions();
+    // Now your pairing repo is ready and sessions restored before pairing starts
+})();
+
 // --- GITHUB SYNC ADDITIONS END ---
 
 
