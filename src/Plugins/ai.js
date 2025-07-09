@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
-const { isPremium } = require('../../lib/premiumsystem');
+const { isPremium } = require('../../lib/premiumSystem');
 const { fromBuffer } = require('file-type');
 const path = require('path');
 
