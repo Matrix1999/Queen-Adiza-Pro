@@ -1,12 +1,12 @@
 require('events').EventEmitter.defaultMaxListeners = 50;
-require('./settings'); 
+require('./settings');
 const {
     Telegraf,
     Markup
 } = require('telegraf');
 const {
     simple
-} = require("./lib/myfunc"); 
+} = require("./lib/myfunc");
 global.activeSockets = global.activeSockets || {}; // Track all active Baileys sockets by JID
 const fs = require("fs");
 const os = require('os');
@@ -16,7 +16,7 @@ const chalk = require('chalk');
 const { exec } = require('child_process');
 const util = require('util'); // Added for util.format
 
-const extendWASocket = require('./lib/matrixUtils'); 
+const extendWASocket = require('./lib/matrixUtils');
 
 const makeWASocket = require("@whiskeysockets/baileys").default
 const { makeCacheableSignalKeyStore, useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, generateWAMessageFromContent, downloadContentFromMessage, jidDecode, proto, Browsers, normalizeMessageContent, getAggregateVotesInPollMessage, areJidsSameUser, jidNormalizedUser } = require("@whiskeysockets/baileys")
@@ -35,7 +35,7 @@ const readmore = String.fromCharCode(8206).repeat(4001);
 const { File } = require('megajs');
 const PhoneNumber = require("awesome-phonenumber");
 const readline = require("readline");
-const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc") 
+const { formatSize, runtime, sleep, serialize, smsg, getBuffer } = require("./lib/myfunc")
 const { imageToWebp, videoToWebp, writeExifImg, writeExifVid } = require('./lib/exif')
 const { toAudio, toPTT, toVideo } = require('./lib/converter')
 const FileType = require('file-type')
@@ -106,11 +106,12 @@ global.loadDatabase = async function loadDatabase() {
     global.db.READ = false;
 
     global.db.data ??= {}; // Ensure it's an object if null
-    
+
+    // Ensure all top-level properties are initialized as objects/arrays
     global.db.data = {
-      chats: global.db.data.chats && Object.keys(global.db.data.chats).length ? global.db.data.chats : {},
-      users: global.db.data.users && Object.keys(global.db.data.users).length ? global.db.data.users : {}, // ADDED THIS LINE FOR INDIVIDUAL USER DATA
-      settings: global.db.data.settings && Object.keys(global.db.data.settings).length ? global.db.data.settings : {
+      chats: global.db.data.chats || {},
+      users: global.db.data.users || {},
+      settings: global.db.data.settings || {
         autobio: false,
         anticall: false,
         autotype: false,
@@ -127,12 +128,13 @@ global.loadDatabase = async function loadDatabase() {
         autoreactstatus: false,
         autorecordtype: false
       },
-      blacklist: global.db.data.blacklist && Object.keys(global.db.data.blacklist).length ? global.db.data.blacklist : {
+      blacklist: global.db.data.blacklist || {
         blacklisted_numbers: []
       },
-      sudo: Array.isArray(global.db.data.sudo) && global.db.data.sudo.length ? global.db.data.sudo : [],
+      sudo: Array.isArray(global.db.data.sudo) ? global.db.data.sudo : [],
       premium: Array.isArray(global.db.data.premium) ? global.db.data.premium : []
-};
+    };
+
     global.db.chain = _.chain(global.db.data);
     await global.db.write();
 };
@@ -212,7 +214,7 @@ async function readDB() {
             // If content is empty or just an empty object, no need to merge, just write defaults if needed
             return;
         }
-        
+
         const defaultSettings = {
             prefix: ".",
             mode: "public",
@@ -272,7 +274,7 @@ async function readDB() {
         await createDB();
         await readDB();
     }
-    await global.loadDatabase();
+    await global.loadDatabase(); // Ensure database is fully loaded and initialized here
 
     // Define global.mode to always reflect the DB
     Object.defineProperty(global, "mode", {
@@ -290,6 +292,10 @@ async function readDB() {
         .map(num => num.includes('@') ? num : `${num}@s.whatsapp.net`)
     ];
     await global.db.write();
+
+    // Now, after global.db.data and its properties are initialized, require premiumSystem.js
+    // This ensures that when premiumSystem.js runs, global.db.data.premium exists.
+    require('./lib/premiumSystem');
 
     // ...rest of your startup logic (startMatrix, etc)...
 })();
@@ -469,18 +475,16 @@ async function startMatrix() {
     msgRetryCounterCache,
     defaultQueryTimeoutMs: undefined,
   });
-  
-  
+
+
   global.mainMatrix = Matrix;
-  
-  require('./lib/premiumSystem'); 
 
   // Extend the Matrix object with your custom utilities
   extendWASocket(Matrix);
 
   // Presence update event listener — track who is online/offline
   Matrix.ev.on('presence.update', ({ id, presences }) => {
-  
+
     if (!store.presences) store.presences = {};
     if (!store.presences[id]) store.presences[id] = {};
 
@@ -510,7 +514,7 @@ async function startMatrix() {
     }, 3000);
   }
 
-  
+
 
 Matrix.ev.on('connection.update', async (update) => {
 	const {
@@ -574,20 +578,20 @@ await Matrix.sendMessage(Matrix.user.id, {
     "╭༺◈👸🌹𝗤𝗨𝗘𝗘𝗡-𝗔𝗗𝗜𝗭𝗔🌹👸\n" +
     "│📌 » *Username*: " + Matrix.user.name + "\n" +
     "│💻 » *Platform*: " + os.platform() + "\n" +
-    "│⚡ » *Global Fallback Prefix*: [ . ]\n" + 
+    "│⚡ » *Global Fallback Prefix*: [ . ]\n" +
     "│🚀 » *Global Fallback Mode*: Public\n" +
     "│🤖 » *Version*: [ " + versions + " ]\n" +
     "╰───━━━༺◈༻━━━───╯\n\n" + // Main bot info block
 
     "╭༺◈👑 *𝗕𝗢𝗧 𝗦𝗧𝗔𝗧𝗨𝗦* 👑◈༻╮\n" +
     `│🕒 *Uptime*: ${runtime(process.uptime())}\n` +
-    "╰───━━━༺◈༻━━━───╯\n\n" + 
+    "╰───━━━༺◈༻━━━───╯\n\n" +
 
-    
+
     "╭༺◈⏰ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗧𝗜𝗠𝗘* ⏰◈༻╮\n" +
     `│🗓️ ${moment.tz(timezones).format('dddd, DD MMMMYYYY')}\n` +
-    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` + 
-    `╰───━━━༺◈༻━━━───╯\n` 
+    `│🕒 ${moment.tz(timezones).format('HH:mm:ss z')}\n` +
+    `╰───━━━༺◈༻━━━───╯\n`
 
 }, {
   ephemeralExpiration: 1800
