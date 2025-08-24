@@ -44,11 +44,11 @@ global.author = process.env.STICKER_AUTHOR_NAME || "Adizatu"
 global.dbToken = process.env.GITHUB_TOKEN || "";
 
 //-----------------[ PREMIUM API SETTINGS ]-----------------//
-global.premiumApiUrl = process.env.PREMIUM_API_URL || 'http://prem-eu1.bot-hosting.net:22392'; // 
+global.premiumApiUrl = process.env.PREMIUM_API_URL || 'http://falcon.godpapa.xyz:25568'; // 
 
 //-----------------[ PREMIUM BOTAPI KEY ]-----------------//
 
-global.botApiKey = process.env.BOT_API_KEY || '4a47d533977e533859273164dd348dfc'; 
+global.botApiKey = process.env.BOT_API_KEY || '3df7302e38da0d5827640873a1a4d8b4'; 
 
 
 //-----------------[ CONTEXT LINK ]--------------------//
