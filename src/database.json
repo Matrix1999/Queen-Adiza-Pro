@@ -1,0 +1,29 @@
+{
+  "chats": {},
+  "settings": {
+    "prefix": ".",
+    "mode": "public",
+    "autobio": false,
+    "anticall": false,
+    "autotype": false,
+    "autoread": false,
+    "welcome": false,
+    "antiedit": "private",
+    "menustyle": "3",
+    "statusemoji": "🧡",
+    "autoreact": false,
+    "autorecord": false,
+    "antidelete": "private",
+    "alwaysonline": false,
+    "autoviewstatus": false,
+    "autoreactstatus": false,
+    "autorecordtype": false,
+    "sudo": [
+      "254796180105@s.whatsapp.net",
+      "254712345678@s.whatsapp.net"
+    ]
+  },
+  "blacklist": {
+    "blacklisted_numbers": []
+  }
+}
